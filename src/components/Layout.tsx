@@ -11,6 +11,7 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
     { to: "/customers", icon: Users, label: "Clientes" },
     { to: "/consumption", icon: Plus, label: "Lançamento" },
     { to: "/payments", icon: DollarSign, label: "Pagamentos" },
+    { to: "/billing", icon: DollarSign, label: "Fechamento" },
   ];
 
   return (
