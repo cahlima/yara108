@@ -29,6 +29,11 @@ interface ConsumptionItem {
   subtotal: number;
 }
 
+interface DayProduct {
+  product: Product;
+  customPrice: number;
+}
+
 const Consumption = () => {
   const [products, setProducts] = useState<Product[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -37,9 +42,10 @@ const Consumption = () => {
   );
   const [items, setItems] = useState<ConsumptionItem[]>([]);
   
-  // Produto do dia
-  const [productOfDay, setProductOfDay] = useState<Product | null>(null);
-  const [customPrice, setCustomPrice] = useState("");
+  // Produtos do dia
+  const [dayProducts, setDayProducts] = useState<DayProduct[]>([]);
+  const [selectedDayProduct, setSelectedDayProduct] = useState<string>("");
+  const [dayProductPrice, setDayProductPrice] = useState("");
   
   // Entrada rápida
   const [selectedCustomer, setSelectedCustomer] = useState("");
@@ -51,11 +57,13 @@ const Consumption = () => {
   }, []);
 
   useEffect(() => {
-    if (productOfDay) {
-      setCustomPrice(productOfDay.price.toString());
-      setSelectedProduct(productOfDay.id);
+    if (selectedDayProduct) {
+      const product = products.find((p) => p.id === selectedDayProduct);
+      if (product) {
+        setDayProductPrice(product.price.toString());
+      }
     }
-  }, [productOfDay]);
+  }, [selectedDayProduct, products]);
 
   const fetchData = async () => {
     try {
@@ -69,15 +77,41 @@ const Consumption = () => {
 
       setProducts(productsData.data || []);
       setCustomers(customersData.data || []);
-      
-      // Auto-seleciona o primeiro produto como produto do dia
-      if (productsData.data && productsData.data.length > 0) {
-        setProductOfDay(productsData.data[0]);
-      }
     } catch (error) {
       console.error("Erro ao carregar dados:", error);
       toast.error("Erro ao carregar dados");
     }
+  };
+
+  const addDayProduct = () => {
+    if (!selectedDayProduct || !dayProductPrice) {
+      toast.error("Selecione um produto e defina o preço");
+      return;
+    }
+
+    const product = products.find((p) => p.id === selectedDayProduct);
+    if (!product) return;
+
+    const alreadyExists = dayProducts.find((dp) => dp.product.id === product.id);
+    if (alreadyExists) {
+      toast.error("Produto já está na lista do dia");
+      return;
+    }
+
+    const newDayProduct: DayProduct = {
+      product,
+      customPrice: parseFloat(dayProductPrice),
+    };
+
+    setDayProducts([...dayProducts, newDayProduct]);
+    setSelectedDayProduct("");
+    setDayProductPrice("");
+    toast.success("Produto do dia adicionado!");
+  };
+
+  const removeDayProduct = (productId: string) => {
+    setDayProducts(dayProducts.filter((dp) => dp.product.id !== productId));
+    toast.success("Produto removido da lista do dia");
   };
 
   const addItem = () => {
@@ -87,12 +121,15 @@ const Consumption = () => {
     }
 
     const customer = customers.find((c) => c.id === selectedCustomer);
+    
+    // Buscar o preço do produto do dia se estiver na lista
+    const dayProduct = dayProducts.find((dp) => dp.product.id === selectedProduct);
     const product = products.find((p) => p.id === selectedProduct);
     
     if (!customer || !product) return;
 
     const qty = parseInt(quantity);
-    const price = parseFloat(customPrice) || product.price;
+    const price = dayProduct ? dayProduct.customPrice : product.price;
     const subtotal = price * qty;
 
     const newItem: ConsumptionItem = {
@@ -190,55 +227,81 @@ const Consumption = () => {
         </CardContent>
       </Card>
 
-      {/* Produto do Dia */}
-      <Card className="border-accent">
+      {/* Produtos do Dia */}
+      <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <ShoppingBag className="w-5 h-5 text-accent" />
-            Produto do Dia
+            <ShoppingBag className="h-5 w-5" />
+            Produtos do Dia
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid gap-4 sm:grid-cols-3">
             <div className="space-y-2">
-              <Label htmlFor="product-day">Selecione o Produto</Label>
-              <Select
-                value={productOfDay?.id || ""}
-                onValueChange={(value) => {
-                  const product = products.find((p) => p.id === value);
-                  setProductOfDay(product || null);
-                }}
+              <Label htmlFor="day-product">Produto</Label>
+              <Select 
+                value={selectedDayProduct} 
+                onValueChange={setSelectedDayProduct}
               >
-                <SelectTrigger>
-                  <SelectValue placeholder="Escolha o produto do dia" />
+                <SelectTrigger id="day-product">
+                  <SelectValue placeholder="Selecione o produto" />
                 </SelectTrigger>
                 <SelectContent className="bg-popover z-50">
                   {products.map((product) => (
                     <SelectItem key={product.id} value={product.id}>
-                      {product.name} - R$ {product.price.toFixed(2)}
+                      {product.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
+
             <div className="space-y-2">
-              <Label htmlFor="custom-price">Preço do Dia (R$)</Label>
+              <Label htmlFor="day-price">Preço do Dia</Label>
               <Input
-                id="custom-price"
+                id="day-price"
                 type="number"
                 step="0.01"
-                value={customPrice}
-                onChange={(e) => setCustomPrice(e.target.value)}
                 placeholder="0.00"
+                value={dayProductPrice}
+                onChange={(e) => setDayProductPrice(e.target.value)}
               />
             </div>
+
+            <div className="space-y-2">
+              <Label>&nbsp;</Label>
+              <Button onClick={addDayProduct} className="w-full">
+                <Plus className="h-4 w-4 mr-2" />
+                Adicionar
+              </Button>
+            </div>
           </div>
-          {productOfDay && (
-            <div className="p-4 bg-accent/10 rounded-lg border border-accent">
-              <p className="text-sm text-muted-foreground">Produto selecionado:</p>
-              <p className="text-2xl font-bold text-accent">
-                {productOfDay.name} - R$ {customPrice || productOfDay.price.toFixed(2)}
-              </p>
+
+          {dayProducts.length > 0 && (
+            <div className="space-y-2">
+              <Label>Lista de Produtos do Dia:</Label>
+              <div className="space-y-2">
+                {dayProducts.map((dp) => (
+                  <div key={dp.product.id} className="flex items-center justify-between p-3 border rounded-lg">
+                    <div>
+                      <span className="font-medium">{dp.product.name}</span>
+                      <span className="text-muted-foreground ml-2">
+                        R$ {dp.customPrice.toFixed(2)}
+                      </span>
+                      <span className="text-xs text-muted-foreground ml-2">
+                        (Padrão: R$ {dp.product.price.toFixed(2)})
+                      </span>
+                    </div>
+                    <Button 
+                      variant="ghost" 
+                      size="sm"
+                      onClick={() => removeDayProduct(dp.product.id)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </CardContent>
@@ -279,17 +342,40 @@ const Consumption = () => {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="product">Produto (opcional)</Label>
+              <Label htmlFor="product">Produto</Label>
               <Select value={selectedProduct} onValueChange={setSelectedProduct}>
                 <SelectTrigger>
-                  <SelectValue placeholder="Usar produto do dia" />
+                  <SelectValue placeholder="Selecione o produto" />
                 </SelectTrigger>
                 <SelectContent className="bg-popover z-50">
-                  {products.map((product) => (
-                    <SelectItem key={product.id} value={product.id}>
-                      {product.name}
-                    </SelectItem>
-                  ))}
+                  {dayProducts.length > 0 ? (
+                    <>
+                      <div className="px-2 py-1.5 text-sm font-semibold text-muted-foreground">
+                        Produtos do Dia
+                      </div>
+                      {dayProducts.map((dp) => (
+                        <SelectItem key={dp.product.id} value={dp.product.id}>
+                          {dp.product.name} - R$ {dp.customPrice.toFixed(2)}
+                        </SelectItem>
+                      ))}
+                      <div className="px-2 py-1.5 text-sm font-semibold text-muted-foreground mt-2">
+                        Outros Produtos
+                      </div>
+                      {products
+                        .filter((p) => !dayProducts.find((dp) => dp.product.id === p.id))
+                        .map((product) => (
+                          <SelectItem key={product.id} value={product.id}>
+                            {product.name} - R$ {product.price.toFixed(2)}
+                          </SelectItem>
+                        ))}
+                    </>
+                  ) : (
+                    products.map((product) => (
+                      <SelectItem key={product.id} value={product.id}>
+                        {product.name} - R$ {product.price.toFixed(2)}
+                      </SelectItem>
+                    ))
+                  )}
                 </SelectContent>
               </Select>
             </div>

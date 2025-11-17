@@ -3,8 +3,9 @@ import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Button } from "@/components/ui/button";
 import { toast } from "@/hooks/use-toast";
-import { Calendar, DollarSign } from "lucide-react";
+import { Calendar, DollarSign, Share2 } from "lucide-react";
 
 interface Customer {
   id: string;
@@ -103,6 +104,35 @@ const Billing = () => {
     });
   };
 
+  const shareWhatsApp = () => {
+    if (!selectedCustomer || records.length === 0) {
+      toast({
+        title: "Nenhum dado para compartilhar",
+        description: "Selecione um cliente com registros",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const customer = customers.find((c) => c.id === selectedCustomer);
+    const total = calculateTotal();
+    
+    let message = `*Fechamento Mensal - ${customer?.name}*\n\n`;
+    
+    records.forEach((record) => {
+      message += `📅 *${formatDate(record.consumption_date)}* - ${formatCurrency(Number(record.total))}\n`;
+      record.items.forEach((item) => {
+        message += `   • ${item.product_name} - ${item.quantity}x ${formatCurrency(Number(item.unit_price))} = ${formatCurrency(Number(item.subtotal))}\n`;
+      });
+      message += `\n`;
+    });
+    
+    message += `\n💰 *Total: ${formatCurrency(total)}*`;
+    
+    const encodedMessage = encodeURIComponent(message);
+    window.open(`https://wa.me/?text=${encodedMessage}`, '_blank');
+  };
+
   return (
     <div className="space-y-6">
       <div>
@@ -138,9 +168,15 @@ const Billing = () => {
             <CardHeader>
               <CardTitle className="flex items-center justify-between">
                 <span>Resumo do Período</span>
-                <span className="text-2xl text-primary">
-                  {formatCurrency(calculateTotal())}
-                </span>
+                <div className="flex items-center gap-4">
+                  <span className="text-2xl text-primary">
+                    {formatCurrency(calculateTotal())}
+                  </span>
+                  <Button onClick={shareWhatsApp} size="sm" className="gap-2">
+                    <Share2 className="h-4 w-4" />
+                    Compartilhar
+                  </Button>
+                </div>
               </CardTitle>
             </CardHeader>
           </Card>
