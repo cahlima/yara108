@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { DollarSign, Users, Package, TrendingUp } from "lucide-react";
 import { toast } from "sonner";
 
@@ -19,15 +21,26 @@ const Dashboard = () => {
     totalProducts: 0,
   });
   const [loading, setLoading] = useState(true);
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
 
   useEffect(() => {
     fetchStats();
-  }, []);
+  }, [startDate, endDate]);
 
   const fetchStats = async () => {
     try {
+      let consumptionQuery = supabase.from("consumption_records").select("total, paid, consumption_date");
+      
+      if (startDate) {
+        consumptionQuery = consumptionQuery.gte("consumption_date", startDate);
+      }
+      if (endDate) {
+        consumptionQuery = consumptionQuery.lte("consumption_date", endDate);
+      }
+      
       const [consumptionData, customersData, productsData] = await Promise.all([
-        supabase.from("consumption_records").select("total, paid"),
+        consumptionQuery,
         supabase.from("customers").select("id", { count: "exact" }),
         supabase.from("products").select("id", { count: "exact" }),
       ]);
@@ -99,6 +112,34 @@ const Dashboard = () => {
         <h2 className="text-3xl font-bold text-foreground mb-2">Dashboard</h2>
         <p className="text-muted-foreground">Visão geral do sistema de consumo</p>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Filtrar por Período</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="start-date">Data Inicial</Label>
+              <Input
+                id="start-date"
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="end-date">Data Final</Label>
+              <Input
+                id="end-date"
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+              />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {statsCards.map((stat) => (
