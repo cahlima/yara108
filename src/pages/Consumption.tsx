@@ -106,7 +106,7 @@ const Consumption = () => {
     };
 
     setItems([...items, newItem]);
-    setSelectedCustomer("");
+    // Cliente permanece selecionado
     setQuantity("1");
     
     toast.success("Item adicionado!");
