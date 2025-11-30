@@ -6,6 +6,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { Trash2, Edit, Phone } from "lucide-react";
+import { z } from "zod";
+
+const customerSchema = z.object({
+  name: z.string().trim().min(1, "Nome é obrigatório").max(100, "Nome deve ter no máximo 100 caracteres"),
+  phone: z.string().trim().regex(/^(\(\d{2}\)\s?)?\d{4,5}-?\d{4}$/, "Telefone inválido").optional().or(z.literal("")),
+});
 
 interface Customer {
   id: string;
@@ -43,16 +49,13 @@ const Customers = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!formData.name) {
-      toast.error("Nome é obrigatório");
-      return;
-    }
-
     try {
+      const validatedData = customerSchema.parse(formData);
+
       if (editingId) {
         const { error } = await supabase
           .from("customers")
-          .update({ name: formData.name, phone: formData.phone || null })
+          .update({ name: validatedData.name, phone: validatedData.phone || null })
           .eq("id", editingId);
 
         if (error) throw error;
@@ -60,7 +63,7 @@ const Customers = () => {
       } else {
         const { error } = await supabase
           .from("customers")
-          .insert({ name: formData.name, phone: formData.phone || null });
+          .insert({ name: validatedData.name, phone: validatedData.phone || null });
 
         if (error) throw error;
         toast.success("Cliente cadastrado com sucesso!");
@@ -70,8 +73,12 @@ const Customers = () => {
       setEditingId(null);
       fetchCustomers();
     } catch (error) {
-      console.error("Erro ao salvar cliente:", error);
-      toast.error("Erro ao salvar cliente");
+      if (error instanceof z.ZodError) {
+        toast.error(error.errors[0].message);
+      } else {
+        console.error("Erro ao salvar cliente:", error);
+        toast.error("Erro ao salvar cliente");
+      }
     }
   };
 

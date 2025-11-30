@@ -7,6 +7,18 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import { Trash2, Save, Plus, ShoppingBag } from "lucide-react";
+import { z } from "zod";
+
+const consumptionSchema = z.object({
+  quantity: z.string().refine((val) => {
+    const num = parseInt(val);
+    return !isNaN(num) && num > 0 && num <= 1000;
+  }, "Quantidade deve ser um número entre 1 e 1000"),
+  price: z.string().refine((val) => {
+    const num = parseFloat(val);
+    return !isNaN(num) && num > 0 && num <= 999999;
+  }, "Preço deve ser um valor válido entre 0.01 e 999999"),
+});
 
 interface Product {
   id: string;
@@ -89,6 +101,15 @@ const Consumption = () => {
       return;
     }
 
+    try {
+      consumptionSchema.shape.price.parse(dayProductPrice);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        toast.error(error.errors[0].message);
+      }
+      return;
+    }
+
     const product = products.find((p) => p.id === selectedDayProduct);
     if (!product) return;
 
@@ -117,6 +138,15 @@ const Consumption = () => {
   const addItem = () => {
     if (!selectedCustomer || !quantity || !selectedProduct) {
       toast.error("Preencha cliente, produto e quantidade");
+      return;
+    }
+
+    try {
+      consumptionSchema.shape.quantity.parse(quantity);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        toast.error(error.errors[0].message);
+      }
       return;
     }
 
