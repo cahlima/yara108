@@ -6,6 +6,15 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { Trash2, Edit } from "lucide-react";
+import { z } from "zod";
+
+const productSchema = z.object({
+  name: z.string().trim().min(1, "Nome do produto é obrigatório").max(100, "Nome deve ter no máximo 100 caracteres"),
+  price: z.string().refine((val) => {
+    const num = parseFloat(val);
+    return !isNaN(num) && num > 0 && num <= 999999;
+  }, "Preço deve ser um valor válido entre 0.01 e 999999"),
+});
 
 interface Product {
   id: string;
@@ -45,16 +54,13 @@ const Products = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!formData.name || !formData.price) {
-      toast.error("Preencha todos os campos");
-      return;
-    }
-
     try {
+      const validatedData = productSchema.parse(formData);
+
       if (editingId) {
         const { error } = await supabase
           .from("products")
-          .update({ name: formData.name, price: parseFloat(formData.price) })
+          .update({ name: validatedData.name, price: parseFloat(validatedData.price) })
           .eq("id", editingId);
 
         if (error) throw error;
@@ -62,7 +68,7 @@ const Products = () => {
       } else {
         const { error } = await supabase
           .from("products")
-          .insert({ name: formData.name, price: parseFloat(formData.price) });
+          .insert({ name: validatedData.name, price: parseFloat(validatedData.price) });
 
         if (error) throw error;
         toast.success("Produto cadastrado com sucesso!");
@@ -72,8 +78,12 @@ const Products = () => {
       setEditingId(null);
       fetchProducts();
     } catch (error) {
-      console.error("Erro ao salvar produto:", error);
-      toast.error("Erro ao salvar produto");
+      if (error instanceof z.ZodError) {
+        toast.error(error.errors[0].message);
+      } else {
+        console.error("Erro ao salvar produto:", error);
+        toast.error("Erro ao salvar produto");
+      }
     }
   };
 
