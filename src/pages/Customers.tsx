@@ -10,7 +10,7 @@ import { z } from "zod";
 
 const customerSchema = z.object({
   name: z.string().trim().min(1, "Nome é obrigatório").max(100, "Nome deve ter no máximo 100 caracteres"),
-  phone: z.string().trim().regex(/^[\d\s()+-]{8,20}$/, "Telefone inválido (mínimo 8 dígitos)").optional().or(z.literal("")),
+  phone: z.string().trim().regex(/^\d{2}\s?\d{8,9}$/, "Telefone inválido (ex: 41 988710852)").optional().or(z.literal("")),
 });
 
 interface Customer {
@@ -135,7 +135,7 @@ const Customers = () => {
                   id="phone"
                   value={formData.phone}
                   onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                  placeholder="(00) 00000-0000"
+                  placeholder="41 988710852"
                 />
               </div>
             </div>
