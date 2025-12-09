@@ -13,37 +13,71 @@ const authSchema = z.object({
   password: z.string().min(6, "Senha deve ter no mínimo 6 caracteres"),
 });
 
+const emailSchema = z.object({
+  email: z.string().email("Email inválido").min(1, "Email é obrigatório"),
+});
+
+type AuthMode = "login" | "signup" | "forgot" | "reset";
+
 export default function Auth() {
-  const [isLogin, setIsLogin] = useState(true);
+  const [mode, setMode] = useState<AuthMode>("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (session) {
+      if (event === "PASSWORD_RECOVERY") {
+        setMode("reset");
+      } else if (session && mode !== "reset") {
         navigate("/");
       }
     });
 
     supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) {
+      if (session && mode !== "reset") {
         navigate("/");
       }
     });
 
     return () => subscription.unsubscribe();
-  }, [navigate]);
+  }, [navigate, mode]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
 
     try {
-      const validatedData = authSchema.parse({ email, password });
+      if (mode === "forgot") {
+        const validatedData = emailSchema.parse({ email });
+        const { error } = await supabase.auth.resetPasswordForEmail(validatedData.email, {
+          redirectTo: `${window.location.origin}/auth`,
+        });
 
-      if (isLogin) {
+        if (error) {
+          toast.error(error.message);
+          return;
+        }
+
+        toast.success("Email de recuperação enviado! Verifique sua caixa de entrada.");
+        setMode("login");
+      } else if (mode === "reset") {
+        const validatedData = authSchema.parse({ email: "placeholder@email.com", password: newPassword });
+        const { error } = await supabase.auth.updateUser({
+          password: validatedData.password,
+        });
+
+        if (error) {
+          toast.error(error.message);
+          return;
+        }
+
+        toast.success("Senha atualizada com sucesso!");
+        navigate("/");
+      } else if (mode === "login") {
+        const validatedData = authSchema.parse({ email, password });
         const { error } = await supabase.auth.signInWithPassword({
           email: validatedData.email,
           password: validatedData.password,
@@ -60,6 +94,7 @@ export default function Auth() {
 
         toast.success("Login realizado com sucesso!");
       } else {
+        const validatedData = authSchema.parse({ email, password });
         const { error } = await supabase.auth.signUp({
           email: validatedData.email,
           password: validatedData.password,
@@ -90,55 +125,126 @@ export default function Auth() {
     }
   };
 
+  const getTitle = () => {
+    switch (mode) {
+      case "login": return "Login";
+      case "signup": return "Cadastro";
+      case "forgot": return "Recuperar Senha";
+      case "reset": return "Nova Senha";
+    }
+  };
+
+  const getDescription = () => {
+    switch (mode) {
+      case "login": return "Entre com suas credenciais para acessar o sistema";
+      case "signup": return "Crie uma conta para começar a usar o sistema";
+      case "forgot": return "Digite seu email para receber o link de recuperação";
+      case "reset": return "Digite sua nova senha";
+    }
+  };
+
+  const getButtonText = () => {
+    if (loading) return "Processando...";
+    switch (mode) {
+      case "login": return "Entrar";
+      case "signup": return "Cadastrar";
+      case "forgot": return "Enviar Email";
+      case "reset": return "Atualizar Senha";
+    }
+  };
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
       <Card className="w-full max-w-md">
         <CardHeader>
-          <CardTitle>{isLogin ? "Login" : "Cadastro"}</CardTitle>
-          <CardDescription>
-            {isLogin
-              ? "Entre com suas credenciais para acessar o sistema"
-              : "Crie uma conta para começar a usar o sistema"}
-          </CardDescription>
+          <CardTitle>{getTitle()}</CardTitle>
+          <CardDescription>{getDescription()}</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                type="email"
-                placeholder="seu@email.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="password">Senha</Label>
-              <Input
-                id="password"
-                type="password"
-                placeholder="••••••••"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-              />
-            </div>
+            {mode !== "reset" && (
+              <div className="space-y-2">
+                <Label htmlFor="email">Email</Label>
+                <Input
+                  id="email"
+                  type="email"
+                  placeholder="seu@email.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                />
+              </div>
+            )}
+            {(mode === "login" || mode === "signup") && (
+              <div className="space-y-2">
+                <Label htmlFor="password">Senha</Label>
+                <Input
+                  id="password"
+                  type="password"
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                />
+              </div>
+            )}
+            {mode === "reset" && (
+              <div className="space-y-2">
+                <Label htmlFor="newPassword">Nova Senha</Label>
+                <Input
+                  id="newPassword"
+                  type="password"
+                  placeholder="••••••••"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  required
+                  minLength={6}
+                />
+              </div>
+            )}
             <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? "Processando..." : isLogin ? "Entrar" : "Cadastrar"}
+              {getButtonText()}
             </Button>
           </form>
-          <div className="mt-4 text-center">
-            <button
-              onClick={() => setIsLogin(!isLogin)}
-              className="text-sm text-muted-foreground hover:text-foreground"
-            >
-              {isLogin
-                ? "Não tem uma conta? Cadastre-se"
-                : "Já tem uma conta? Faça login"}
-            </button>
-          </div>
+          
+          {mode === "login" && (
+            <div className="mt-4 space-y-2 text-center">
+              <button
+                onClick={() => setMode("forgot")}
+                className="text-sm text-muted-foreground hover:text-foreground block w-full"
+              >
+                Esqueceu sua senha?
+              </button>
+              <button
+                onClick={() => setMode("signup")}
+                className="text-sm text-muted-foreground hover:text-foreground block w-full"
+              >
+                Não tem uma conta? Cadastre-se
+              </button>
+            </div>
+          )}
+          
+          {mode === "signup" && (
+            <div className="mt-4 text-center">
+              <button
+                onClick={() => setMode("login")}
+                className="text-sm text-muted-foreground hover:text-foreground"
+              >
+                Já tem uma conta? Faça login
+              </button>
+            </div>
+          )}
+          
+          {mode === "forgot" && (
+            <div className="mt-4 text-center">
+              <button
+                onClick={() => setMode("login")}
+                className="text-sm text-muted-foreground hover:text-foreground"
+              >
+                Voltar ao login
+              </button>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>
