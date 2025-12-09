@@ -10,7 +10,7 @@ import { z } from "zod";
 
 const customerSchema = z.object({
   name: z.string().trim().min(1, "Nome é obrigatório").max(100, "Nome deve ter no máximo 100 caracteres"),
-  phone: z.string().trim().regex(/^(\(\d{2}\)\s?)?\d{4,5}-?\d{4}$/, "Telefone inválido").optional().or(z.literal("")),
+  phone: z.string().trim().regex(/^[\d\s()+-]{8,20}$/, "Telefone inválido (mínimo 8 dígitos)").optional().or(z.literal("")),
 });
 
 interface Customer {
