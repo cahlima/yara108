@@ -276,7 +276,7 @@ const Consumption = () => {
                 <SelectTrigger id="day-product">
                   <SelectValue placeholder="Selecione o produto" />
                 </SelectTrigger>
-                <SelectContent className="bg-popover z-50">
+                <SelectContent className="bg-popover border border-border shadow-lg z-50 max-h-60 overflow-y-auto">
                   {products.map((product) => (
                     <SelectItem key={product.id} value={product.id}>
                       {product.name}
@@ -350,7 +350,7 @@ const Consumption = () => {
                 <SelectTrigger>
                   <SelectValue placeholder="Selecione o cliente" />
                 </SelectTrigger>
-                <SelectContent className="bg-popover z-50">
+                <SelectContent className="bg-popover border border-border shadow-lg z-50 max-h-60 overflow-y-auto">
                   {customers.map((customer) => (
                     <SelectItem key={customer.id} value={customer.id}>
                       {customer.name}
@@ -377,7 +377,7 @@ const Consumption = () => {
                 <SelectTrigger>
                   <SelectValue placeholder="Selecione o produto" />
                 </SelectTrigger>
-                <SelectContent className="bg-popover z-50">
+                <SelectContent className="bg-popover border border-border shadow-lg z-50 max-h-60 overflow-y-auto">
                   {dayProducts.length > 0 ? (
                     <>
                       <div className="px-2 py-1.5 text-sm font-semibold text-muted-foreground">
