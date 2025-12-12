@@ -204,6 +204,9 @@ const Consumption = () => {
         return acc;
       }, {} as Record<string, ConsumptionItem[]>);
 
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Usuário não autenticado");
+
       // Criar um registro para cada cliente
       const records = Object.entries(itemsByCustomer).map(([customerId, customerItems]) => {
         const total = customerItems.reduce((sum, item) => sum + item.subtotal, 0);
@@ -219,6 +222,7 @@ const Consumption = () => {
           })) as any,
           total,
           paid: false,
+          user_id: user.id,
         };
       });
 

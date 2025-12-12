@@ -66,9 +66,12 @@ const Products = () => {
         if (error) throw error;
         toast.success("Produto atualizado com sucesso!");
       } else {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) throw new Error("Usuário não autenticado");
+        
         const { error } = await supabase
           .from("products")
-          .insert({ name: validatedData.name, price: parseFloat(validatedData.price) });
+          .insert({ name: validatedData.name, price: parseFloat(validatedData.price), user_id: user.id });
 
         if (error) throw error;
         toast.success("Produto cadastrado com sucesso!");

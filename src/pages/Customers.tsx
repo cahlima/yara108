@@ -61,9 +61,12 @@ const Customers = () => {
         if (error) throw error;
         toast.success("Cliente atualizado com sucesso!");
       } else {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) throw new Error("Usuário não autenticado");
+        
         const { error } = await supabase
           .from("customers")
-          .insert({ name: validatedData.name, phone: validatedData.phone || null });
+          .insert({ name: validatedData.name, phone: validatedData.phone || null, user_id: user.id });
 
         if (error) throw error;
         toast.success("Cliente cadastrado com sucesso!");
