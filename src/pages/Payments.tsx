@@ -50,7 +50,7 @@ const Payments = () => {
       if (error) throw error;
       setRecords((data as any) || []);
     } catch (error) {
-      console.error("Erro ao carregar registros:", error);
+      if (import.meta.env.DEV) console.error("Erro ao carregar registros:", error);
       toast.error("Erro ao carregar registros");
     } finally {
       setLoading(false);
@@ -69,7 +69,7 @@ const Payments = () => {
       toast.success("Pagamento registrado com sucesso!");
       fetchRecords();
     } catch (error) {
-      console.error("Erro ao registrar pagamento:", error);
+      if (import.meta.env.DEV) console.error("Erro ao registrar pagamento:", error);
       toast.error("Erro ao registrar pagamento");
     }
   };

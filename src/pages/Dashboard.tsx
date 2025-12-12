@@ -64,7 +64,7 @@ const Dashboard = () => {
         totalProducts: productsData.count || 0,
       });
     } catch (error) {
-      console.error("Erro ao carregar estatísticas:", error);
+      if (import.meta.env.DEV) console.error("Erro ao carregar estatísticas:", error);
       toast.error("Erro ao carregar estatísticas");
     } finally {
       setLoading(false);
