@@ -24,6 +24,7 @@ export type Database = {
           paid: boolean | null
           payment_date: string | null
           total: number
+          user_id: string | null
         }
         Insert: {
           consumption_date: string
@@ -34,6 +35,7 @@ export type Database = {
           paid?: boolean | null
           payment_date?: string | null
           total: number
+          user_id?: string | null
         }
         Update: {
           consumption_date?: string
@@ -44,6 +46,7 @@ export type Database = {
           paid?: boolean | null
           payment_date?: string | null
           total?: number
+          user_id?: string | null
         }
         Relationships: [
           {
@@ -61,18 +64,21 @@ export type Database = {
           id: string
           name: string
           phone: string | null
+          user_id: string | null
         }
         Insert: {
           created_at?: string | null
           id?: string
           name: string
           phone?: string | null
+          user_id?: string | null
         }
         Update: {
           created_at?: string | null
           id?: string
           name?: string
           phone?: string | null
+          user_id?: string | null
         }
         Relationships: []
       }
@@ -83,6 +89,7 @@ export type Database = {
           id: string
           name: string
           price: number
+          user_id: string | null
         }
         Insert: {
           active?: boolean | null
@@ -90,6 +97,7 @@ export type Database = {
           id?: string
           name: string
           price: number
+          user_id?: string | null
         }
         Update: {
           active?: boolean | null
@@ -97,6 +105,7 @@ export type Database = {
           id?: string
           name?: string
           price?: number
+          user_id?: string | null
         }
         Relationships: []
       }
