@@ -90,7 +90,7 @@ const Consumption = () => {
       setProducts(productsData.data || []);
       setCustomers(customersData.data || []);
     } catch (error) {
-      console.error("Erro ao carregar dados:", error);
+      if (import.meta.env.DEV) console.error("Erro ao carregar dados:", error);
       toast.error("Erro ao carregar dados");
     }
   };
@@ -233,7 +233,7 @@ const Consumption = () => {
       toast.success(`${records.length} consumo(s) registrado(s) com sucesso!`);
       setItems([]);
     } catch (error) {
-      console.error("Erro ao registrar consumos:", error);
+      if (import.meta.env.DEV) console.error("Erro ao registrar consumos:", error);
       toast.error("Erro ao registrar consumos");
     }
   };

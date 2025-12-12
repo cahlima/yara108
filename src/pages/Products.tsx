@@ -44,7 +44,7 @@ const Products = () => {
       if (error) throw error;
       setProducts(data || []);
     } catch (error) {
-      console.error("Erro ao carregar produtos:", error);
+      if (import.meta.env.DEV) console.error("Erro ao carregar produtos:", error);
       toast.error("Erro ao carregar produtos");
     } finally {
       setLoading(false);
@@ -84,7 +84,7 @@ const Products = () => {
       if (error instanceof z.ZodError) {
         toast.error(error.errors[0].message);
       } else {
-        console.error("Erro ao salvar produto:", error);
+        if (import.meta.env.DEV) console.error("Erro ao salvar produto:", error);
         toast.error("Erro ao salvar produto");
       }
     }
@@ -108,7 +108,7 @@ const Products = () => {
       toast.success("Produto excluído com sucesso!");
       fetchProducts();
     } catch (error) {
-      console.error("Erro ao excluir produto:", error);
+      if (import.meta.env.DEV) console.error("Erro ao excluir produto:", error);
       toast.error("Erro ao excluir produto");
     }
   };

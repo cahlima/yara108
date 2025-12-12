@@ -39,7 +39,7 @@ const Customers = () => {
       if (error) throw error;
       setCustomers(data || []);
     } catch (error) {
-      console.error("Erro ao carregar clientes:", error);
+      if (import.meta.env.DEV) console.error("Erro ao carregar clientes:", error);
       toast.error("Erro ao carregar clientes");
     } finally {
       setLoading(false);
@@ -79,7 +79,7 @@ const Customers = () => {
       if (error instanceof z.ZodError) {
         toast.error(error.errors[0].message);
       } else {
-        console.error("Erro ao salvar cliente:", error);
+        if (import.meta.env.DEV) console.error("Erro ao salvar cliente:", error);
         toast.error("Erro ao salvar cliente");
       }
     }
@@ -100,7 +100,7 @@ const Customers = () => {
       toast.success("Cliente excluído com sucesso!");
       fetchCustomers();
     } catch (error) {
-      console.error("Erro ao excluir cliente:", error);
+      if (import.meta.env.DEV) console.error("Erro ao excluir cliente:", error);
       toast.error("Erro ao excluir cliente");
     }
   };
