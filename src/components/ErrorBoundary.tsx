@@ -1,7 +1,4 @@
-import React, { Component, ErrorInfo, ReactNode } from "react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { AlertTriangle, RefreshCw } from "lucide-react";
+import { Component, ErrorInfo, ReactNode } from "react";
 
 interface Props {
   children: ReactNode;
@@ -25,37 +22,57 @@ class ErrorBoundary extends Component<Props, State> {
     console.error("Erro capturado:", error, errorInfo);
   }
 
-  private handleRetry = () => {
-    this.setState({ hasError: false, error: undefined });
-    window.location.reload();
-  };
-
   public render() {
     if (this.state.hasError) {
       return (
-        <div className="min-h-screen bg-background flex items-center justify-center p-4">
-          <Card className="max-w-md w-full">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-destructive">
-                <AlertTriangle className="h-5 w-5" />
-                Ops! Algo deu errado
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <p className="text-muted-foreground">
-                Ocorreu um erro inesperado. Por favor, tente novamente.
+        <div style={{ 
+          minHeight: '100vh', 
+          display: 'flex', 
+          alignItems: 'center', 
+          justifyContent: 'center',
+          padding: '1rem',
+          backgroundColor: '#f5f5f5'
+        }}>
+          <div style={{
+            backgroundColor: 'white',
+            padding: '2rem',
+            borderRadius: '0.5rem',
+            maxWidth: '400px',
+            textAlign: 'center',
+            boxShadow: '0 4px 6px rgba(0,0,0,0.1)'
+          }}>
+            <h2 style={{ color: '#dc2626', marginBottom: '1rem' }}>
+              Ops! Algo deu errado
+            </h2>
+            <p style={{ color: '#666', marginBottom: '1rem' }}>
+              Ocorreu um erro inesperado.
+            </p>
+            {this.state.error && (
+              <p style={{ 
+                fontSize: '0.75rem', 
+                color: '#999', 
+                backgroundColor: '#f0f0f0',
+                padding: '0.5rem',
+                borderRadius: '0.25rem',
+                marginBottom: '1rem'
+              }}>
+                {this.state.error.message}
               </p>
-              {this.state.error && (
-                <p className="text-xs text-muted-foreground bg-muted p-2 rounded">
-                  {this.state.error.message}
-                </p>
-              )}
-              <Button onClick={this.handleRetry} className="w-full">
-                <RefreshCw className="h-4 w-4 mr-2" />
-                Tentar Novamente
-              </Button>
-            </CardContent>
-          </Card>
+            )}
+            <button
+              onClick={() => window.location.href = '/'}
+              style={{
+                backgroundColor: '#ea580c',
+                color: 'white',
+                padding: '0.5rem 1rem',
+                borderRadius: '0.25rem',
+                border: 'none',
+                cursor: 'pointer'
+              }}
+            >
+              Ir para o Início
+            </button>
+          </div>
         </div>
       );
     }
