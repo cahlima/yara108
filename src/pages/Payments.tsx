@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import { Check, ExternalLink } from "lucide-react";
+import { Check, ExternalLink, Trash2, Calendar } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -14,6 +14,17 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 
 interface ConsumptionRecord {
   id: string;
@@ -35,6 +46,8 @@ const Payments = () => {
   const [selectedRecord, setSelectedRecord] = useState<ConsumptionRecord | null>(
     null
   );
+  const [editingDateRecord, setEditingDateRecord] = useState<ConsumptionRecord | null>(null);
+  const [newConsumptionDate, setNewConsumptionDate] = useState("");
 
   useEffect(() => {
     fetchRecords();
@@ -74,6 +87,47 @@ const Payments = () => {
     }
   };
 
+  const handleDelete = async (recordId: string) => {
+    try {
+      const { error } = await supabase
+        .from("consumption_records")
+        .delete()
+        .eq("id", recordId);
+
+      if (error) throw error;
+
+      toast.success("Lançamento excluído com sucesso!");
+      fetchRecords();
+    } catch (error) {
+      if (import.meta.env.DEV) console.error("Erro ao excluir lançamento:", error);
+      toast.error("Erro ao excluir lançamento");
+    }
+  };
+
+  const handleEditDate = async (recordId: string) => {
+    if (!newConsumptionDate) {
+      toast.error("Selecione uma data");
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from("consumption_records")
+        .update({ consumption_date: newConsumptionDate })
+        .eq("id", recordId);
+
+      if (error) throw error;
+
+      toast.success("Data atualizada com sucesso!");
+      setEditingDateRecord(null);
+      setNewConsumptionDate("");
+      fetchRecords();
+    } catch (error) {
+      if (import.meta.env.DEV) console.error("Erro ao atualizar data:", error);
+      toast.error("Erro ao atualizar data");
+    }
+  };
+
   const shareWhatsApp = (record: ConsumptionRecord) => {
     const items = record.items
       .map((item: any) => `${item.quantity}x ${item.product_name} - R$ ${item.subtotal.toFixed(2)}`)
@@ -94,6 +148,81 @@ const Payments = () => {
 
     window.open(url, "_blank");
   };
+
+  const RecordActions = ({ record }: { record: ConsumptionRecord }) => (
+    <div className="flex gap-1">
+      <Dialog 
+        open={editingDateRecord?.id === record.id} 
+        onOpenChange={(open) => {
+          if (open) {
+            setEditingDateRecord(record);
+            setNewConsumptionDate(record.consumption_date);
+          } else {
+            setEditingDateRecord(null);
+            setNewConsumptionDate("");
+          }
+        }}
+      >
+        <DialogTrigger asChild>
+          <Button variant="outline" size="icon" title="Editar data">
+            <Calendar className="w-4 h-4" />
+          </Button>
+        </DialogTrigger>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Editar Data do Consumo</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Cliente: <strong>{record.customers.name}</strong>
+            </p>
+            <div className="space-y-2">
+              <Label htmlFor="new-date">Nova Data</Label>
+              <Input
+                id="new-date"
+                type="date"
+                value={newConsumptionDate}
+                onChange={(e) => setNewConsumptionDate(e.target.value)}
+              />
+            </div>
+            <Button
+              onClick={() => handleEditDate(record.id)}
+              className="w-full"
+            >
+              Salvar Alteração
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog>
+        <AlertDialogTrigger asChild>
+          <Button variant="destructive" size="icon" title="Excluir lançamento">
+            <Trash2 className="w-4 h-4" />
+          </Button>
+        </AlertDialogTrigger>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir Lançamento?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta ação não pode ser desfeita. O lançamento de{" "}
+              <strong>{record.customers.name}</strong> no valor de{" "}
+              <strong>R$ {record.total.toFixed(2)}</strong> será excluído permanentemente.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => handleDelete(record.id)}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Excluir
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
 
   if (loading) {
     return <div className="text-center py-8">Carregando...</div>;
@@ -128,9 +257,12 @@ const Payments = () => {
                           {new Date(record.consumption_date).toLocaleDateString("pt-BR")}
                         </p>
                       </div>
-                      <Badge variant="outline" className="bg-warning/10 text-warning border-warning">
-                        Pendente
-                      </Badge>
+                      <div className="flex items-center gap-2">
+                        <RecordActions record={record} />
+                        <Badge variant="outline" className="bg-warning/10 text-warning border-warning">
+                          Pendente
+                        </Badge>
+                      </div>
                     </div>
 
                     <div className="space-y-2">
@@ -231,10 +363,13 @@ const Payments = () => {
                           {new Date(record.payment_date!).toLocaleDateString("pt-BR")}
                         </p>
                       </div>
-                      <Badge className="bg-success text-success-foreground">
-                        <Check className="w-3 h-3 mr-1" />
-                        Pago
-                      </Badge>
+                      <div className="flex items-center gap-2">
+                        <RecordActions record={record} />
+                        <Badge className="bg-success text-success-foreground">
+                          <Check className="w-3 h-3 mr-1" />
+                          Pago
+                        </Badge>
+                      </div>
                     </div>
 
                     <div className="space-y-2">
