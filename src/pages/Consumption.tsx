@@ -219,7 +219,7 @@ const Consumption = () => {
             quantity: item.quantity,
             unit_price: item.unit_price,
             subtotal: item.subtotal
-          })) as any,
+          })),
           total,
           paid: false,
           user_id: user.id,
