@@ -379,36 +379,19 @@ const Consumption = () => {
               <Label htmlFor="product">Produto</Label>
               <Select value={selectedProduct} onValueChange={setSelectedProduct}>
                 <SelectTrigger>
-                  <SelectValue placeholder="Selecione o produto" />
+                  <SelectValue placeholder={dayProducts.length === 0 ? "Adicione produtos do dia primeiro" : "Selecione o produto"} />
                 </SelectTrigger>
                 <SelectContent>
                   {dayProducts.length > 0 ? (
-                    <>
-                      <div className="px-2 py-1.5 text-sm font-semibold text-muted-foreground">
-                        Produtos do Dia
-                      </div>
-                      {dayProducts.map((dp) => (
-                        <SelectItem key={dp.product.id} value={dp.product.id}>
-                          {dp.product.name} - R$ {dp.customPrice.toFixed(2)}
-                        </SelectItem>
-                      ))}
-                      <div className="px-2 py-1.5 text-sm font-semibold text-muted-foreground mt-2">
-                        Outros Produtos
-                      </div>
-                      {products
-                        .filter((p) => !dayProducts.find((dp) => dp.product.id === p.id))
-                        .map((product) => (
-                          <SelectItem key={product.id} value={product.id}>
-                            {product.name} - R$ {product.price.toFixed(2)}
-                          </SelectItem>
-                        ))}
-                    </>
-                  ) : (
-                    products.map((product) => (
-                      <SelectItem key={product.id} value={product.id}>
-                        {product.name} - R$ {product.price.toFixed(2)}
+                    dayProducts.map((dp) => (
+                      <SelectItem key={dp.product.id} value={dp.product.id}>
+                        {dp.product.name} - R$ {dp.customPrice.toFixed(2)}
                       </SelectItem>
                     ))
+                  ) : (
+                    <div className="px-2 py-4 text-sm text-muted-foreground text-center">
+                      Adicione produtos do dia acima
+                    </div>
                   )}
                 </SelectContent>
               </Select>
