@@ -11,7 +11,10 @@ import Consumption from "@/pages/Consumption";
 import Payments from "@/pages/Payments";
 import Billing from "@/pages/Billing";
 import Auth from "@/pages/Auth";
+import Admin from "@/pages/Admin";
+import PendingApproval from "@/pages/PendingApproval";
 import ProtectedRoute from "@/components/ProtectedRoute";
+import AdminRoute from "@/components/AdminRoute";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import NotFound from "./pages/NotFound";
 
@@ -26,6 +29,7 @@ const App = () => (
         <BrowserRouter>
           <Routes>
             <Route path="/auth" element={<Auth />} />
+            <Route path="/pending-approval" element={<PendingApproval />} />
             <Route
               path="/*"
               element={
@@ -37,7 +41,22 @@ const App = () => (
                       <Route path="/customers" element={<Customers />} />
                       <Route path="/consumption" element={<Consumption />} />
                       <Route path="/payments" element={<Payments />} />
-                      <Route path="/billing" element={<Billing />} />
+                      <Route
+                        path="/billing"
+                        element={
+                          <AdminRoute>
+                            <Billing />
+                          </AdminRoute>
+                        }
+                      />
+                      <Route
+                        path="/admin"
+                        element={
+                          <AdminRoute>
+                            <Admin />
+                          </AdminRoute>
+                        }
+                      />
                       <Route path="*" element={<NotFound />} />
                     </Routes>
                   </Layout>

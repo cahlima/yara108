@@ -1,8 +1,8 @@
 import { Navigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 
-export default function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { user, isApproved, loading } = useAuth();
+export default function AdminRoute({ children }: { children: React.ReactNode }) {
+  const { user, isAdmin, loading } = useAuth();
 
   if (loading) {
     return (
@@ -16,8 +16,8 @@ export default function ProtectedRoute({ children }: { children: React.ReactNode
     return <Navigate to="/auth" replace />;
   }
 
-  if (isApproved === false) {
-    return <Navigate to="/pending-approval" replace />;
+  if (!isAdmin) {
+    return <Navigate to="/" replace />;
   }
 
   return <>{children}</>;

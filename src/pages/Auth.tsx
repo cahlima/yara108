@@ -123,7 +123,8 @@ export default function Auth() {
           return;
         }
 
-        toast.success("Cadastro realizado! Você já pode fazer login.");
+        toast.success("Cadastro realizado! Aguarde a aprovação do administrador para acessar o sistema.");
+        setMode("login");
       }
     } catch (error) {
       if (error instanceof z.ZodError) {
