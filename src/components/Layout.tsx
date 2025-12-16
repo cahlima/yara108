@@ -1,13 +1,15 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { Home, Package, Users, Plus, DollarSign, LogOut } from "lucide-react";
+import { Home, Package, Users, Plus, DollarSign, LogOut, Shield } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
+import { useAuth } from "@/hooks/useAuth";
 
 const Layout = ({ children }: { children: React.ReactNode }) => {
   const location = useLocation();
   const navigate = useNavigate();
+  const { isAdmin } = useAuth();
 
   const handleLogout = async () => {
     const { error } = await supabase.auth.signOut();
@@ -20,13 +22,16 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
   };
 
   const navItems = [
-    { to: "/", icon: Home, label: "Dashboard" },
-    { to: "/products", icon: Package, label: "Produtos" },
-    { to: "/customers", icon: Users, label: "Clientes" },
-    { to: "/consumption", icon: Plus, label: "Lançamento" },
-    { to: "/payments", icon: DollarSign, label: "Pagamentos" },
-    { to: "/billing", icon: DollarSign, label: "Fechamento" },
+    { to: "/", icon: Home, label: "Dashboard", adminOnly: false },
+    { to: "/products", icon: Package, label: "Produtos", adminOnly: false },
+    { to: "/customers", icon: Users, label: "Clientes", adminOnly: false },
+    { to: "/consumption", icon: Plus, label: "Lançamento", adminOnly: false },
+    { to: "/payments", icon: DollarSign, label: "Pagamentos", adminOnly: false },
+    { to: "/billing", icon: DollarSign, label: "Fechamento", adminOnly: true },
+    { to: "/admin", icon: Shield, label: "Admin", adminOnly: true },
   ];
+
+  const filteredNavItems = navItems.filter(item => !item.adminOnly || isAdmin);
 
   return (
     <div className="min-h-screen bg-background">
@@ -43,7 +48,7 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
       <nav className="border-b border-border bg-card">
         <div className="container mx-auto px-4">
           <div className="flex gap-1 overflow-x-auto">
-            {navItems.map(({ to, icon: Icon, label }) => (
+            {filteredNavItems.map(({ to, icon: Icon, label }) => (
               <Link
                 key={to}
                 to={to}
