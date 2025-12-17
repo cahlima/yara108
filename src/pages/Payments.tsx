@@ -143,8 +143,8 @@ const Payments = () => {
 
     const phone = record.customers.phone?.replace(/\D/g, "");
     const url = phone
-      ? `https://wa.me/55${phone}?text=${encodeURIComponent(message)}`
-      : `https://wa.me/?text=${encodeURIComponent(message)}`;
+      ? `https://web.whatsapp.com/send?phone=55${phone}&text=${encodeURIComponent(message)}`
+      : `https://web.whatsapp.com/send?text=${encodeURIComponent(message)}`;
 
     window.open(url, "_blank");
   };
