@@ -138,7 +138,8 @@ const Customers = () => {
                   id="phone"
                   value={formData.phone}
                   onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                  placeholder="41 988710852"
+                  placeholder="Ex: 41 988710852"
+                  autoComplete="off"
                 />
               </div>
             </div>
