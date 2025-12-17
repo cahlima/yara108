@@ -6,8 +6,8 @@ export default function AdminRoute({ children }: { children: React.ReactNode }) 
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-lg">Carregando...</div>
+      <div className="flex items-center justify-center py-8">
+        <div className="text-lg text-muted-foreground">Verificando permissões...</div>
       </div>
     );
   }
@@ -20,5 +20,5 @@ export default function AdminRoute({ children }: { children: React.ReactNode }) 
     return <Navigate to="/" replace />;
   }
 
-  return <>{children}</>;
+  return children;
 }
