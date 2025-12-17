@@ -36,8 +36,8 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
   return (
     <div className="min-h-screen bg-background relative">
       <div 
-        className="fixed inset-0 bg-contain bg-top bg-no-repeat opacity-10 pointer-events-none z-0"
-        style={{ backgroundImage: "url('/images/background.webp')" }}
+        className="fixed inset-0 bg-cover bg-no-repeat opacity-10 pointer-events-none z-0"
+        style={{ backgroundImage: "url('/images/background.webp')", backgroundPosition: "center 20%" }}
       />
       <header className="border-b border-border bg-card/95 backdrop-blur-sm sticky top-0 z-10 border-b-2 border-b-secondary/30 relative">
         <div className="container mx-auto px-4 py-4 flex items-center justify-between">
