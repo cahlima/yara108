@@ -133,13 +133,16 @@ const Customers = () => {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="phone">Telefone (opcional)</Label>
+                <Label htmlFor="customer-phone">Telefone (opcional)</Label>
                 <Input
-                  id="phone"
+                  id="customer-phone"
+                  name="customer-phone-field"
                   value={formData.phone}
                   onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
                   placeholder="Ex: 41 988710852"
-                  autoComplete="off"
+                  autoComplete="new-password"
+                  data-lpignore="true"
+                  data-form-type="other"
                 />
               </div>
             </div>
