@@ -142,11 +142,12 @@ const Payments = () => {
     }`;
 
     const phone = record.customers.phone?.replace(/\D/g, "");
+    const encodedMessage = encodeURIComponent(message);
     const url = phone
-      ? `https://web.whatsapp.com/send?phone=55${phone}&text=${encodeURIComponent(message)}`
-      : `https://web.whatsapp.com/send?text=${encodeURIComponent(message)}`;
+      ? `https://wa.me/55${phone}?text=${encodedMessage}`
+      : `https://wa.me/?text=${encodedMessage}`;
 
-    window.open(url, "_blank");
+    window.location.href = url;
   };
 
   const RecordActions = ({ record }: { record: ConsumptionRecord }) => (

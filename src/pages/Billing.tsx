@@ -130,7 +130,8 @@ const Billing = () => {
     message += `\n💰 *Total: ${formatCurrency(total)}*`;
     
     const encodedMessage = encodeURIComponent(message);
-    window.open(`https://web.whatsapp.com/send?text=${encodedMessage}`, '_blank');
+    const whatsappUrl = `https://wa.me/?text=${encodedMessage}`;
+    window.location.href = whatsappUrl;
   };
 
   return (
