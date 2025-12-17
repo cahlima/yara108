@@ -2,7 +2,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Outlet } from "react-router-dom";
 import Layout from "@/components/Layout";
 import Dashboard from "@/pages/Dashboard";
 import Products from "@/pages/Products";
@@ -20,6 +20,14 @@ import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
 
+const ProtectedLayout = () => (
+  <ProtectedRoute>
+    <Layout>
+      <Outlet />
+    </Layout>
+  </ProtectedRoute>
+);
+
 const App = () => (
   <ErrorBoundary>
     <QueryClientProvider client={queryClient}>
@@ -30,39 +38,30 @@ const App = () => (
           <Routes>
             <Route path="/auth" element={<Auth />} />
             <Route path="/pending-approval" element={<PendingApproval />} />
-            <Route
-              path="/*"
-              element={
-                <ProtectedRoute>
-                  <Layout>
-                    <Routes>
-                      <Route path="/" element={<Dashboard />} />
-                      <Route path="/products" element={<Products />} />
-                      <Route path="/customers" element={<Customers />} />
-                      <Route path="/consumption" element={<Consumption />} />
-                      <Route path="/payments" element={<Payments />} />
-                      <Route
-                        path="/billing"
-                        element={
-                          <AdminRoute>
-                            <Billing />
-                          </AdminRoute>
-                        }
-                      />
-                      <Route
-                        path="/admin"
-                        element={
-                          <AdminRoute>
-                            <Admin />
-                          </AdminRoute>
-                        }
-                      />
-                      <Route path="*" element={<NotFound />} />
-                    </Routes>
-                  </Layout>
-                </ProtectedRoute>
-              }
-            />
+            <Route element={<ProtectedLayout />}>
+              <Route path="/" element={<Dashboard />} />
+              <Route path="/products" element={<Products />} />
+              <Route path="/customers" element={<Customers />} />
+              <Route path="/consumption" element={<Consumption />} />
+              <Route path="/payments" element={<Payments />} />
+              <Route
+                path="/billing"
+                element={
+                  <AdminRoute>
+                    <Billing />
+                  </AdminRoute>
+                }
+              />
+              <Route
+                path="/admin"
+                element={
+                  <AdminRoute>
+                    <Admin />
+                  </AdminRoute>
+                }
+              />
+              <Route path="*" element={<NotFound />} />
+            </Route>
           </Routes>
         </BrowserRouter>
       </TooltipProvider>
