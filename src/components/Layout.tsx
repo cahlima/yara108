@@ -37,7 +37,7 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
     <div className="min-h-screen bg-background">
       <header className="border-b border-border bg-card sticky top-0 z-10">
         <div className="container mx-auto px-4 py-4 flex items-center justify-between">
-          <h1 className="text-2xl font-bold text-primary">Sistema de Consumo</h1>
+          <h1 className="text-2xl font-bold text-primary">Sistema Consumo <span className="text-secondary">Yara108</span></h1>
           <Button variant="ghost" size="sm" onClick={handleLogout}>
             <LogOut className="w-4 h-4 mr-2" />
             Sair
