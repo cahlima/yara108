@@ -51,10 +51,14 @@ export default {
   				DEFAULT: 'hsl(var(--popover))',
   				foreground: 'hsl(var(--popover-foreground))'
   			},
-  			card: {
-  				DEFAULT: 'hsl(var(--card))',
-  				foreground: 'hsl(var(--card-foreground))'
-  			},
+			card: {
+				DEFAULT: 'hsl(var(--card))',
+				foreground: 'hsl(var(--card-foreground))'
+			},
+			lilac: {
+				DEFAULT: 'hsl(var(--lilac))',
+				foreground: 'hsl(var(--lilac-foreground))'
+			},
   			sidebar: {
   				DEFAULT: 'hsl(var(--sidebar-background))',
   				foreground: 'hsl(var(--sidebar-foreground))',
