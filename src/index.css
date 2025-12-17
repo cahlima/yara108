@@ -26,6 +26,9 @@ All colors MUST be HSL.
     --secondary: 270 50% 60%;
     --secondary-foreground: 0 0% 100%;
 
+    --lilac: 270 50% 70%;
+    --lilac-foreground: 270 50% 20%;
+
     --muted: 0 0% 63%;
     --muted-foreground: 0 0% 9%;
 
@@ -117,6 +120,9 @@ All colors MUST be HSL.
 
     --secondary: 270 60% 70%;
     --secondary-foreground: 0 0% 100%;
+
+    --lilac: 270 60% 75%;
+    --lilac-foreground: 270 60% 95%;
 
     --muted: 0 0% 45%;
     --muted-foreground: 0 0% 98%;

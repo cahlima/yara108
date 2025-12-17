@@ -35,10 +35,10 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
 
   return (
     <div className="min-h-screen bg-background">
-      <header className="border-b border-border bg-card sticky top-0 z-10">
+      <header className="border-b border-border bg-card sticky top-0 z-10 border-b-2 border-b-secondary/30">
         <div className="container mx-auto px-4 py-4 flex items-center justify-between">
           <h1 className="text-2xl font-bold text-primary">Sistema Consumo <span className="text-secondary">Yara108</span></h1>
-          <Button variant="ghost" size="sm" onClick={handleLogout}>
+          <Button variant="outline" size="sm" onClick={handleLogout}>
             <LogOut className="w-4 h-4 mr-2" />
             Sair
           </Button>
@@ -53,10 +53,10 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
                 key={to}
                 to={to}
                 className={cn(
-                  "flex items-center gap-2 px-4 py-3 rounded-t-lg transition-colors whitespace-nowrap",
+                  "flex items-center gap-2 px-4 py-3 rounded-t-lg transition-all whitespace-nowrap",
                   location.pathname === to
-                    ? "bg-background text-primary font-medium border-b-2 border-primary"
-                    : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                    ? "bg-background text-primary font-medium border-b-2 border-primary shadow-sm"
+                    : "text-muted-foreground hover:text-secondary hover:bg-secondary/10"
                 )}
               >
                 <Icon className="w-4 h-4" />
