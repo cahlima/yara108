@@ -34,8 +34,12 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
   const filteredNavItems = navItems.filter(item => !item.adminOnly || isAdmin);
 
   return (
-    <div className="min-h-screen bg-background">
-      <header className="border-b border-border bg-card sticky top-0 z-10 border-b-2 border-b-secondary/30">
+    <div className="min-h-screen bg-background relative">
+      <div 
+        className="fixed inset-0 bg-cover bg-center bg-no-repeat opacity-10 pointer-events-none z-0"
+        style={{ backgroundImage: "url('/images/background.webp')" }}
+      />
+      <header className="border-b border-border bg-card/95 backdrop-blur-sm sticky top-0 z-10 border-b-2 border-b-secondary/30 relative">
         <div className="container mx-auto px-4 py-4 flex items-center justify-between">
           <h1 className="text-2xl font-bold text-primary">Sistema Consumo <span className="text-secondary">Yara108</span></h1>
           <Button variant="outline" size="sm" onClick={handleLogout}>
@@ -45,7 +49,7 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
         </div>
       </header>
 
-      <nav className="border-b border-border bg-card">
+      <nav className="border-b border-border bg-card/95 backdrop-blur-sm relative z-10">
         <div className="container mx-auto px-4">
           <div className="flex gap-1 overflow-x-auto">
             {filteredNavItems.map(({ to, icon: Icon, label }) => (
@@ -67,7 +71,7 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
         </div>
       </nav>
 
-      <main className="container mx-auto px-4 py-8">{children}</main>
+      <main className="container mx-auto px-4 py-8 relative z-10">{children}</main>
     </div>
   );
 };
