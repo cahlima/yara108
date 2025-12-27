@@ -1,6 +1,5 @@
 import { useState, useEffect } from "react";
-import { collection, getDocs, doc, updateDoc } from "firebase/firestore";
-import { db } from "@/lib/firebase";
+import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -24,38 +23,27 @@ export default function Admin() {
     fetchUsers();
   }, []);
 
-  const formatTimestamp = (timestamp: any) => {
-    if (timestamp && typeof timestamp.toDate === 'function') {
-      return timestamp.toDate().toISOString();
-    }
-    // Fallback for cases where created_at might not be a Firestore Timestamp
-    return new Date().toISOString(); 
-  };
-
   const fetchUsers = async () => {
-    setLoading(true);
     try {
-      const profilesCollection = collection(db, "profiles");
-      const profilesSnapshot = await getDocs(profilesCollection);
-      const profiles = profilesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const { data: profiles, error } = await supabase
+        .from("profiles")
+        .select("*")
+        .order("created_at", { ascending: false });
 
-      const rolesCollection = collection(db, "user_roles");
-      const rolesSnapshot = await getDocs(rolesCollection);
-      const adminUserIds = new Set(
-        rolesSnapshot.docs
-          .filter(doc => doc.data().role === 'admin')
-          .map(doc => doc.data().user_id)
-      );
+      if (error) throw error;
 
-      const usersWithRoles: UserProfile[] = profiles.map(p => ({
-        id: p.id,
-        email: p.email,
-        approved: p.approved,
-        created_at: formatTimestamp(p.created_at),
+      // Get admin roles
+      const { data: adminRoles } = await supabase
+        .from("user_roles")
+        .select("user_id")
+        .eq("role", "admin");
+
+      const adminUserIds = new Set(adminRoles?.map(r => r.user_id) || []);
+
+      const usersWithRoles = (profiles || []).map(p => ({
+        ...p,
         isAdmin: adminUserIds.has(p.id),
       }));
-
-      usersWithRoles.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
       setUsers(usersWithRoles);
     } catch (error) {
@@ -68,8 +56,13 @@ export default function Admin() {
 
   const handleApprove = async (userId: string) => {
     try {
-      const userDocRef = doc(db, "profiles", userId);
-      await updateDoc(userDocRef, { approved: true });
+      const { error } = await supabase
+        .from("profiles")
+        .update({ approved: true })
+        .eq("id", userId);
+
+      if (error) throw error;
+
       toast.success("Usuário aprovado com sucesso");
       fetchUsers();
     } catch (error) {
@@ -80,8 +73,13 @@ export default function Admin() {
 
   const handleRevoke = async (userId: string) => {
     try {
-      const userDocRef = doc(db, "profiles", userId);
-      await updateDoc(userDocRef, { approved: false });
+      const { error } = await supabase
+        .from("profiles")
+        .update({ approved: false })
+        .eq("id", userId);
+
+      if (error) throw error;
+
       toast.success("Acesso revogado");
       fetchUsers();
     } catch (error) {
@@ -110,6 +108,7 @@ export default function Admin() {
         <p className="text-muted-foreground">Gerencie os usuários do sistema</p>
       </div>
 
+      {/* Pending Approvals */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -157,6 +156,7 @@ export default function Admin() {
         </CardContent>
       </Card>
 
+      {/* Approved Users */}
       <Card>
         <CardHeader>
           <CardTitle>Usuários Aprovados</CardTitle>
