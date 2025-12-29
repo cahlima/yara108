@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
-import { db, app } from "@/lib/firebase"; // Standardized import
-import { getAuth } from "firebase/auth";
+import { db } from "@/lib/firebase";
 import {
   collection,
   getDocs,
@@ -18,6 +17,7 @@ import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { Trash2, Edit } from "lucide-react";
 import { z } from "zod";
+import { useAuth } from "@/hooks/useAuth";
 
 const productSchema = z.object({
   name: z.string().trim().min(1, "Nome do produto é obrigatório").max(100, "Nome deve ter no máximo 100 caracteres"),
@@ -42,10 +42,13 @@ const Products = () => {
   const [loading, setLoading] = useState(true);
   const [formData, setFormData] = useState({ name: "", price: "" });
   const [editingId, setEditingId] = useState<string | null>(null);
+  const { isAdmin, loading: authLoading } = useAuth();
 
   useEffect(() => {
-    fetchProducts();
-  }, []);
+    if (!authLoading) {
+      fetchProducts();
+    }
+  }, [authLoading]);
 
   const fetchProducts = async () => {
     setLoading(true);
@@ -71,13 +74,6 @@ const Products = () => {
     try {
       const validatedData = productSchema.parse(formData);
       const priceAsNumber = parseFloat(validatedData.price);
-      const auth = getAuth(app);
-      const user = auth.currentUser;
-
-      if (!user) {
-        toast.error("Você precisa estar autenticado para gerenciar produtos.");
-        return;
-      }
 
       if (editingId) {
         const productRef = doc(db, "products", editingId);
@@ -91,7 +87,6 @@ const Products = () => {
           name: validatedData.name,
           price: priceAsNumber,
           active: true,
-          user_id: user.uid, 
           created_at: new Date().toISOString(),
         });
         toast.success("Produto cadastrado com sucesso!");
@@ -116,7 +111,6 @@ const Products = () => {
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  // Soft delete
   const handleDelete = async (id: string) => {
     if (!confirm("Deseja realmente desativar este produto?")) return;
 
@@ -131,7 +125,7 @@ const Products = () => {
     }
   };
 
-  if (loading) {
+  if (loading || authLoading) {
     return <div className="text-center py-8">Carregando...</div>;
   }
 
@@ -210,13 +204,15 @@ const Products = () => {
                   >
                     <Edit className="w-4 h-4" />
                   </Button>
-                  <Button
-                    variant="destructive"
-                    size="icon"
-                    onClick={() => handleDelete(product.id)}
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
+                  {isAdmin && (
+                    <Button
+                      variant="destructive"
+                      size="icon"
+                      onClick={() => handleDelete(product.id)}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  )}
                 </div>
               </div>
             </CardContent>

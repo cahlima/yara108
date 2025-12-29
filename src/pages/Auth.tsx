@@ -6,18 +6,18 @@ import { toast } from "sonner";
 import { app, db } from "@/lib/firebase";
 import {
   getAuth,
-  onAuthStateChanged,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   sendPasswordResetEmail,
   confirmPasswordReset,
 } from "firebase/auth";
-import { doc, setDoc, getDoc } from "firebase/firestore";
+import { doc, setDoc } from "firebase/firestore";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { useAuth } from "@/hooks/useAuth";
 
 const authSchema = z.object({
   email: z.string().email("Email inválido").min(1, "Email é obrigatório"),
@@ -39,10 +39,10 @@ export default function Auth() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
-  const [loading, setLoading] = useState(false);
   const [oobCode, setOobCode] = useState<string | null>(null);
   const navigate = useNavigate();
   const auth = getAuth(app);
+  const { user, loading } = useAuth();
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -53,29 +53,15 @@ export default function Auth() {
       setMode("reset");
       setOobCode(paramOobCode);
     }
+  }, []);
 
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      if (user) {
-        const adminDocRef = doc(db, "admins", user.uid);
-        const adminDoc = await getDoc(adminDocRef);
-        
-        // Check for customer approval (if they aren't an admin)
-        if (adminDoc.exists()) {
-            navigate("/");
-        } else {
-            const userDocRef = doc(db, "customers", user.uid);
-            const userDoc = await getDoc(userDocRef);
-            if (userDoc.exists() && userDoc.data().approved) {
-              navigate("/");
-            } else {
-              navigate("/pending-approval");
-            }
-        }
-      }
-    });
+  // Redirect if user is already logged in
+  useEffect(() => {
+    if (user && !loading) {
+      navigate("/");
+    }
+  }, [user, loading, navigate]);
 
-    return () => unsubscribe();
-  }, [auth, navigate]);
 
   const handleAuthError = (error: any) => {
     if (error.code === 'auth/invalid-email') {
@@ -85,13 +71,13 @@ export default function Auth() {
     } else if (error.code === 'auth/email-already-in-use') {
         toast.error("Este email já está cadastrado.");
     } else {
-        toast.error(error.message || "Ocorreu um erro.");
+        toast.error("Ocorreu um erro inesperado. Tente novamente.");
+        console.error("Auth error:", error);
     }
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
 
     try {
       if (mode === "forgot") {
@@ -113,7 +99,7 @@ export default function Auth() {
       } else if (mode === "login") {
         const validatedData = authSchema.parse({ email, password });
         await signInWithEmailAndPassword(auth, validatedData.email, validatedData.password);
-        // onAuthStateChanged will handle navigation
+        // useAuth and useEffect will handle navigation
 
       } else { // signup
         const validatedData = authSchema.parse({ email, password });
@@ -121,7 +107,7 @@ export default function Auth() {
         const user = userCredential.user;
         const isAdminEmail = user.email === "caciabad@gmail.com";
 
-        // Create user profile in Firestore
+        // Create user profile in Firestore. The useAuth hook will handle admin creation.
         await setDoc(doc(db, "customers", user.uid), {
             id: user.uid,
             email: user.email,
@@ -131,10 +117,6 @@ export default function Auth() {
         });
 
         if (isAdminEmail) {
-            await setDoc(doc(db, "admins", user.uid), {
-                role: "admin",
-                created_at: new Date().toISOString(),
-            });
             toast.success("Conta de administrador criada com sucesso! Você será redirecionado.");
         } else {
             toast.success("Cadastro realizado! Aguarde a aprovação do administrador.");
@@ -146,9 +128,7 @@ export default function Auth() {
       } else {
         handleAuthError(error);
       }
-    } finally {
-      setLoading(false);
-    }
+    } 
   };
 
   const getTitle = () => {

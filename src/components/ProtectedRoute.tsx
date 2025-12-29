@@ -1,9 +1,15 @@
 import { Navigate } from "react-router-dom";
-import { useAuth } from "@/hooks/useAuth";
+// --- CORREÇÃO: Padronizando o import para usar o alias '@/' ---
+import { useAuth } from "@/hooks/useAuth"; 
 import { ReactNode } from "react";
 
+/**
+ *  Este componente protege uma rota, garantindo que apenas usuários autenticados
+ *  possam acessá-la. Ele lida com o estado de carregamento e redireciona para
+ *  a página de login se o usuário não estiver logado.
+ */
 export default function ProtectedRoute({ children }: { children: ReactNode }) {
-  const { user, isApproved, loading } = useAuth();
+  const { user, loading } = useAuth();
 
   if (loading) {
     return (
@@ -14,11 +20,7 @@ export default function ProtectedRoute({ children }: { children: ReactNode }) {
   }
 
   if (!user) {
-    return <Navigate to="/auth" replace />;
-  }
-
-  if (isApproved === false) {
-    return <Navigate to="/pending-approval" replace />;
+    return <Navigate to="/login" replace />;
   }
 
   return children;

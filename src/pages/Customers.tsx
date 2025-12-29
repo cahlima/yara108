@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
-import { db, app } from "@/lib/firebase";
-import { getAuth } from "firebase/auth";
+import { db } from "@/lib/firebase";
 import {
   collection,
   getDocs,
@@ -9,7 +8,6 @@ import {
   deleteDoc,
   doc,
   query,
-  orderBy,
 } from "firebase/firestore";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -18,6 +16,7 @@ import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { Trash2, Edit, Phone } from "lucide-react";
 import { z } from "zod";
+import { useAuth } from "@/hooks/useAuth";
 
 const customerSchema = z.object({
   name: z.string().trim().min(1, "Nome é obrigatório").max(100, "Nome deve ter no máximo 100 caracteres"),
@@ -40,16 +39,13 @@ const Customers = () => {
   const [loading, setLoading] = useState(true);
   const [formData, setFormData] = useState({ name: "", phone: "" });
   const [editingId, setEditingId] = useState<string | null>(null);
-
-  useEffect(() => {
-    fetchCustomers();
-  }, []);
+  const { loading: authLoading, isAdmin } = useAuth();
 
   const fetchCustomers = async () => {
     setLoading(true);
     try {
       const customersRef = collection(db, "customers");
-      const q = query(customersRef, orderBy("name"));
+      const q = query(customersRef);
       const querySnapshot = await getDocs(q);
       const customersList = querySnapshot.docs.map(
         (doc) => ({ id: doc.id, ...doc.data() } as Customer)
@@ -63,18 +59,17 @@ const Customers = () => {
     }
   };
 
+  useEffect(() => {
+    if (!authLoading) {
+      fetchCustomers();
+    }
+  }, [authLoading]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     try {
       const validatedData = customerSchema.parse(formData);
-      const auth = getAuth(app);
-      const user = auth.currentUser;
-
-      if (!user) {
-        toast.error("Você precisa estar autenticado para criar um cliente.");
-        return;
-      }
 
       if (editingId) {
         const customerRef = doc(db, "customers", editingId);
@@ -87,7 +82,6 @@ const Customers = () => {
         await addDoc(collection(db, "customers"), {
           name: validatedData.name,
           phone: validatedData.phone || null,
-          user_id: user.uid, // Associate customer with the logged-in user
           created_at: new Date().toISOString(),
         });
         toast.success("Cliente cadastrado com sucesso!");
@@ -122,12 +116,11 @@ const Customers = () => {
       fetchCustomers(); // Refresh the list
     } catch (error) {
       if (import.meta.env.DEV) console.error("Erro ao excluir cliente:", error);
-      // You might want to check for constraints, e.g., if the customer has existing records
       toast.error("Erro ao excluir cliente. Verifique se ele não possui consumos registrados.");
     }
   };
   
-  if (loading) {
+  if (loading || authLoading) {
     return <div className="text-center py-8">Carregando...</div>;
   }
 
@@ -210,13 +203,15 @@ const Customers = () => {
                   >
                     <Edit className="w-4 h-4" />
                   </Button>
-                  <Button
-                    variant="destructive"
-                    size="icon"
-                    onClick={() => handleDelete(customer.id)}
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
+                  {isAdmin && (
+                    <Button
+                      variant="destructive"
+                      size="icon"
+                      onClick={() => handleDelete(customer.id)}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  )}
                 </div>
               </div>
             </CardContent>

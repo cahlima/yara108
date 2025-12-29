@@ -1,6 +1,5 @@
 
 rules_version = '2';
-
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -9,42 +8,52 @@ service cloud.firestore {
       return request.auth != null && request.auth.uid == userId;
     }
 
-    // PRODUCTS: Allow any authenticated user to read all products
-    match /products/{productId} {
-      allow read: if request.auth != null;
-      // Allow write only if you are an admin (example, adjust as needed)
-      // allow write: if get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true;
+    // Helper function to check for admin
+    function isAdmin() {
+      // This function requires the /admins/{adminId} rule below to work
+      return request.auth != null && get(/databases/$(database)/documents/admins/$(request.auth.uid)).exists;
     }
 
-    // CUSTOMERS: Allow any authenticated user to read all customers
+    // ADMINS: Allow users to read their own admin status. Allow other admins to write.
+    match /admins/{adminId} {
+      allow get: if isOwner(adminId);
+      allow write: if isAdmin();
+    }
+
+    // PRODUCTS: Allow any authenticated user to list/get products, only admins can write
+    match /products/{productId} {
+      allow get, list: if request.auth != null; // CORRECTED RULE
+      allow write: if isAdmin();
+    }
+
+    // CUSTOMERS: This collection might be phased out, but keeping rules for safety.
     match /customers/{customerId} {
-      allow read: if request.auth != null;
-      // Allow write only if you are an admin (example, adjust as needed)
-      // allow write: if get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true;
+      allow get, list: if request.auth != null; // CORRECTED RULE
+      allow write: if isAdmin();
     }
 
     // DAY_PRODUCTS: Users can only manage their own day_products
     match /day_products/{dayProductId} {
-      // Allow reading a list (query) if the query's user_id matches the logged-in user
       allow list: if isOwner(request.query.user_id);
-      // Allow getting a single document if the user is the owner
       allow get: if isOwner(resource.data.user_id);
-      // Allow creating if the new document's user_id is the user's own id
       allow create: if isOwner(request.resource.data.user_id);
-      // Allow updating and deleting if the existing document belongs to the user
       allow update, delete: if isOwner(resource.data.user_id);
     }
 
     // CONSUMPTION_RECORDS: Users can only manage their own consumption records
     match /consumption_records/{recordId} {
-      allow read, list: if isOwner(resource.data.user_id) || isOwner(request.query.user_id);
+      allow list: if isOwner(request.query.user_id);
+      allow get: if isOwner(resource.data.user_id);
       allow create: if isOwner(request.resource.data.user_id);
       allow update, delete: if isOwner(resource.data.user_id);
     }
     
-    // USERS: Basic rule to allow users to read their own info
+    // USERS: Treated as the customer list.
     match /users/{userId} {
-      allow read, write: if isOwner(userId);
+      // Admins can read and write the entire collection.
+      allow read, write: if isAdmin();
+      // Individual users can get their own document.
+      allow get: if isOwner(userId);
     }
   }
 }

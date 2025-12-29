@@ -1,54 +1,71 @@
-import { useEffect, useState } from "react";
-import { getAuth, onAuthStateChanged, User } from "firebase/auth";
-import { doc, getDoc } from "firebase/firestore";
-import { app, db } from "@/lib/firebase";
+import {
+  useState,
+  useEffect,
+  createContext,
+  useContext,
+  ReactNode,
+} from 'react';
+import { onAuthStateChanged, User } from 'firebase/auth';
+import { doc, getDoc } from 'firebase/firestore';
+// --- CORREÇÃO: Padronizando import para usar alias --- 
+import { auth, db } from '@/lib/firebase'; 
 
-interface AuthState {
+interface AuthContextType {
   user: User | null;
   isAdmin: boolean;
   loading: boolean;
 }
 
-export function useAuth(): AuthState {
-  const [state, setState] = useState<AuthState>({
-    user: null,
-    isAdmin: false,
-    loading: true,
-  });
+const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+export const AuthProvider = ({ children }: { children: ReactNode }) => {
+  const [user, setUser] = useState<User | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const auth = getAuth(app);
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      if (user) {
-        const adminDocRef = doc(db, "admins", user.uid);
-        try {
-          const adminDoc = await getDoc(adminDocRef);
-          const isAdmin = adminDoc.exists();
+    // --- CORREÇÃO: Função async nomeada para clareza e compatibilidade com Vite ---
+    const checkUserAuth = async (currentUser: User | null) => {
+      setLoading(true);
+      setUser(currentUser);
 
-          setState({
-            user,
-            isAdmin,
-            loading: false,
-          });
-        } catch (error) {
-          console.error("Error checking admin status:", error);
-          setState({
-            user,
-            isAdmin: false, // Assume not admin on error
-            loading: false,
-          });
-        }
-      } else {
-        setState({
-          user: null,
-          isAdmin: false,
-          loading: false,
-        });
+      if (!currentUser) {
+        setIsAdmin(false);
+        setLoading(false);
+        return;
       }
-    });
 
+      // Se houver um usuário, verifica o status de admin no Firestore
+      try {
+        const adminRef = doc(db, 'admins', currentUser.uid);
+        const adminSnap = await getDoc(adminRef);
+        setIsAdmin(adminSnap.exists());
+      } catch (error) {
+        console.error('Erro ao verificar status de admin:', error);
+        setIsAdmin(false);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    // Passa a referência da função nomeada para o listener
+    const unsubscribe = onAuthStateChanged(auth, checkUserAuth);
+
+    // Função de limpeza para remover o listener quando o componente desmontar
     return () => unsubscribe();
   }, []);
 
-  return state;
-}
+  return (
+    <AuthContext.Provider value={{ user, isAdmin, loading }}>
+      {children}
+    </AuthContext.Provider>
+  );
+};
+
+export const useAuth = () => {
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error('useAuth deve ser usado dentro de um AuthProvider');
+  }
+  return context;
+};

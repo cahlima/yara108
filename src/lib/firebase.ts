@@ -3,14 +3,14 @@ import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
 
-// Your web app's Firebase configuration
+// Your web app's Firebase configuration is now loaded from environment variables
 const firebaseConfig = {
-  apiKey: "AIzaSyCL4vz6kMIX_neZwZ6kSHGdKsVSwzNwDH0",
-  authDomain: "yara108-b7b92.firebaseapp.com",
-  projectId: "yara108-b7b92",
-  storageBucket: "yara108-b7b92.appspot.com",
-  messagingSenderId: "828298841802",
-  appId: "1:828298841802:web:09099f302e8cdc0b006e33"
+  apiKey: import.meta.env.VITE_API_KEY,
+  authDomain: import.meta.env.VITE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_APP_ID
 };
 
 // Initialize Firebase
