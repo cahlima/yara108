@@ -1,7 +1,8 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Home, Package, Users, Plus, DollarSign, LogOut, Shield } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { supabase } from "@/integrations/supabase/client";
+import { getAuth, signOut } from "firebase/auth"; // Firebase imports
+import { app } from "@/lib/firebase"; // Firebase app import
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
@@ -12,12 +13,14 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
   const { isAdmin } = useAuth();
 
   const handleLogout = async () => {
-    const { error } = await supabase.auth.signOut();
-    if (error) {
-      toast.error("Erro ao sair");
-    } else {
+    const auth = getAuth(app);
+    try {
+      await signOut(auth);
       toast.success("Logout realizado com sucesso");
       navigate("/auth");
+    } catch (error) {
+      console.error("Erro ao sair: ", error);
+      toast.error("Erro ao sair");
     }
   };
 

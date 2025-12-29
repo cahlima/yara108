@@ -1,0 +1,50 @@
+
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper function to check ownership
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    // PRODUCTS: Allow any authenticated user to read all products
+    match /products/{productId} {
+      allow read: if request.auth != null;
+      // Allow write only if you are an admin (example, adjust as needed)
+      // allow write: if get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true;
+    }
+
+    // CUSTOMERS: Allow any authenticated user to read all customers
+    match /customers/{customerId} {
+      allow read: if request.auth != null;
+      // Allow write only if you are an admin (example, adjust as needed)
+      // allow write: if get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true;
+    }
+
+    // DAY_PRODUCTS: Users can only manage their own day_products
+    match /day_products/{dayProductId} {
+      // Allow reading a list (query) if the query's user_id matches the logged-in user
+      allow list: if isOwner(request.query.user_id);
+      // Allow getting a single document if the user is the owner
+      allow get: if isOwner(resource.data.user_id);
+      // Allow creating if the new document's user_id is the user's own id
+      allow create: if isOwner(request.resource.data.user_id);
+      // Allow updating and deleting if the existing document belongs to the user
+      allow update, delete: if isOwner(resource.data.user_id);
+    }
+
+    // CONSUMPTION_RECORDS: Users can only manage their own consumption records
+    match /consumption_records/{recordId} {
+      allow read, list: if isOwner(resource.data.user_id) || isOwner(request.query.user_id);
+      allow create: if isOwner(request.resource.data.user_id);
+      allow update, delete: if isOwner(resource.data.user_id);
+    }
+    
+    // USERS: Basic rule to allow users to read their own info
+    match /users/{userId} {
+      allow read, write: if isOwner(userId);
+    }
+  }
+}

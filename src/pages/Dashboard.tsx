@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { db } from "@/lib/firebase";
+import { collection, getDocs, query, where } from "firebase/firestore";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -43,26 +44,28 @@ const Dashboard = () => {
 
   const fetchStats = async () => {
     try {
-      const [consumptionData, customersData] = await Promise.all([
-        supabase.from("consumption_records").select("total, paid"),
-        supabase.from("customers").select("id", { count: "exact" }),
+      const consumptionRecordsRef = collection(db, "consumption_records");
+      const customersRef = collection(db, "customers");
+
+      const [consumptionSnapshot, customersSnapshot] = await Promise.all([
+        getDocs(consumptionRecordsRef),
+        getDocs(customersRef),
       ]);
 
-      if (consumptionData.error) throw consumptionData.error;
-      if (customersData.error) throw customersData.error;
-
-      const totalPending = consumptionData.data
-        ?.filter((r) => !r.paid)
+      const consumptionData = consumptionSnapshot.docs.map((doc) => doc.data());
+      
+      const totalPending = consumptionData
+        .filter((r) => !r.paid)
         .reduce((sum, r) => sum + Number(r.total), 0) || 0;
 
-      const totalPaid = consumptionData.data
-        ?.filter((r) => r.paid)
+      const totalPaid = consumptionData
+        .filter((r) => r.paid)
         .reduce((sum, r) => sum + Number(r.total), 0) || 0;
 
       setStats({
         totalPending,
         totalPaid,
-        totalCustomers: customersData.count || 0,
+        totalCustomers: customersSnapshot.size || 0,
       });
     } catch (error) {
       if (import.meta.env.DEV) console.error("Erro ao carregar estatísticas:", error);
@@ -80,31 +83,41 @@ const Dashboard = () => {
 
     setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from("consumption_records")
-        .select(`
-          consumption_date,
-          total,
-          customer_id,
-          customers (name)
-        `)
-        .gte("consumption_date", startDate)
-        .lte("consumption_date", endDate)
-        .order("consumption_date", { ascending: true });
+      const consumptionRecordsRef = collection(db, "consumption_records");
+      const q = query(
+        consumptionRecordsRef,
+        where("consumption_date", ">=", startDate),
+        where("consumption_date", "<=", endDate)
+      );
+      const querySnapshot = await getDocs(q);
+      const consumptionData = querySnapshot.docs.map(doc => doc.data());
 
-      if (error) throw error;
+      const customerIds = [...new Set(consumptionData.map(r => r.customer_id).filter(id => id))];
+      
+      const customersMap = new Map<string, string>();
+      if (customerIds.length > 0) {
+        const customersQuery = query(collection(db, "customers"), where("id", "in", customerIds));
+        const customersSnapshot = await getDocs(customersQuery);
+        customersSnapshot.forEach(doc => {
+          const customer = doc.data();
+          customersMap.set(customer.id, customer.name);
+        });
+      }
 
       // Group by date
       const groupedByDate: { [key: string]: DailyRecord[] } = {};
       
-      data?.forEach((record: any) => {
+      consumptionData.forEach(record => {
         const date = record.consumption_date;
         if (!groupedByDate[date]) {
           groupedByDate[date] = [];
         }
+        
+        const customerName = customersMap.get(record.customer_id) || "Cliente desconhecido";
+
         groupedByDate[date].push({
           date,
-          customerName: record.customers?.name || "Cliente desconhecido",
+          customerName,
           total: Number(record.total),
         });
       });

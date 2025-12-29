@@ -1,5 +1,16 @@
 import { useEffect, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { db, app } from "@/lib/firebase"; // Standardized import
+import { getAuth } from "firebase/auth";
+import {
+  collection,
+  getDocs,
+  addDoc,
+  updateDoc,
+  doc,
+  query,
+  where,
+  orderBy,
+} from "firebase/firestore";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -10,10 +21,13 @@ import { z } from "zod";
 
 const productSchema = z.object({
   name: z.string().trim().min(1, "Nome do produto é obrigatório").max(100, "Nome deve ter no máximo 100 caracteres"),
-  price: z.string().refine((val) => {
-    const num = parseFloat(val);
-    return !isNaN(num) && num > 0 && num <= 999999;
-  }, "Preço deve ser um valor válido entre 0.01 e 999999"),
+  price: z.preprocess(
+    (val) => String(val).replace(",", "."), // Allow comma as decimal separator
+    z.string().refine((val) => {
+        const num = parseFloat(val);
+        return !isNaN(num) && num > 0 && num <= 999999;
+    }, "Preço deve ser um valor válido maior que zero")
+  ),
 });
 
 interface Product {
@@ -34,15 +48,15 @@ const Products = () => {
   }, []);
 
   const fetchProducts = async () => {
+    setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from("products")
-        .select("*")
-        .eq("active", true)
-        .order("name");
-
-      if (error) throw error;
-      setProducts(data || []);
+      const productsRef = collection(db, "products");
+      const q = query(productsRef, where("active", "==", true), orderBy("name"));
+      const querySnapshot = await getDocs(q);
+      const productsList = querySnapshot.docs.map(
+        (doc) => ({ id: doc.id, ...doc.data() } as Product)
+      );
+      setProducts(productsList);
     } catch (error) {
       if (import.meta.env.DEV) console.error("Erro ao carregar produtos:", error);
       toast.error("Erro ao carregar produtos");
@@ -56,24 +70,30 @@ const Products = () => {
 
     try {
       const validatedData = productSchema.parse(formData);
+      const priceAsNumber = parseFloat(validatedData.price);
+      const auth = getAuth(app);
+      const user = auth.currentUser;
+
+      if (!user) {
+        toast.error("Você precisa estar autenticado para gerenciar produtos.");
+        return;
+      }
 
       if (editingId) {
-        const { error } = await supabase
-          .from("products")
-          .update({ name: validatedData.name, price: parseFloat(validatedData.price) })
-          .eq("id", editingId);
-
-        if (error) throw error;
+        const productRef = doc(db, "products", editingId);
+        await updateDoc(productRef, {
+          name: validatedData.name,
+          price: priceAsNumber,
+        });
         toast.success("Produto atualizado com sucesso!");
       } else {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) throw new Error("Usuário não autenticado");
-        
-        const { error } = await supabase
-          .from("products")
-          .insert({ name: validatedData.name, price: parseFloat(validatedData.price), user_id: user.id });
-
-        if (error) throw error;
+        await addDoc(collection(db, "products"), {
+          name: validatedData.name,
+          price: priceAsNumber,
+          active: true,
+          user_id: user.uid, 
+          created_at: new Date().toISOString(),
+        });
         toast.success("Produto cadastrado com sucesso!");
       }
 
@@ -82,7 +102,7 @@ const Products = () => {
       fetchProducts();
     } catch (error) {
       if (error instanceof z.ZodError) {
-        toast.error(error.errors[0].message);
+        error.errors.forEach((err) => toast.error(err.message));
       } else {
         if (import.meta.env.DEV) console.error("Erro ao salvar produto:", error);
         toast.error("Erro ao salvar produto");
@@ -91,25 +111,23 @@ const Products = () => {
   };
 
   const handleEdit = (product: Product) => {
-    setFormData({ name: product.name, price: product.price.toString() });
+    setFormData({ name: product.name, price: product.price.toString().replace(".", ",") });
     setEditingId(product.id);
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
+  // Soft delete
   const handleDelete = async (id: string) => {
-    if (!confirm("Deseja realmente excluir este produto?")) return;
+    if (!confirm("Deseja realmente desativar este produto?")) return;
 
     try {
-      const { error } = await supabase
-        .from("products")
-        .update({ active: false })
-        .eq("id", id);
-
-      if (error) throw error;
-      toast.success("Produto excluído com sucesso!");
+      const productRef = doc(db, "products", id);
+      await updateDoc(productRef, { active: false });
+      toast.success("Produto desativado com sucesso!");
       fetchProducts();
     } catch (error) {
-      if (import.meta.env.DEV) console.error("Erro ao excluir produto:", error);
-      toast.error("Erro ao excluir produto");
+      if (import.meta.env.DEV) console.error("Erro ao desativar produto:", error);
+      toast.error("Erro ao desativar produto");
     }
   };
 
@@ -121,12 +139,12 @@ const Products = () => {
     <div className="space-y-8">
       <div>
         <h2 className="text-3xl font-bold text-foreground mb-2">Produtos</h2>
-        <p className="text-muted-foreground">Gerencie os produtos disponíveis</p>
+        <p className="text-muted-foreground">Gerencie os produtos disponíveis para consumo.</p>
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle>{editingId ? "Editar" : "Cadastrar"} Produto</CardTitle>
+          <CardTitle>{editingId ? "Editar Produto" : "Cadastrar Novo Produto"}</CardTitle>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -137,24 +155,24 @@ const Products = () => {
                   id="name"
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  placeholder="Ex: Refrigerante"
+                  placeholder="Ex: Água Mineral 500ml"
+                  required
                 />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="price">Preço (R$)</Label>
                 <Input
                   id="price"
-                  type="number"
-                  step="0.01"
                   value={formData.price}
                   onChange={(e) => setFormData({ ...formData, price: e.target.value })}
-                  placeholder="0.00"
+                  placeholder="Ex: 2,50"
+                  required
                 />
               </div>
             </div>
             <div className="flex gap-2">
               <Button type="submit" className="bg-primary hover:bg-primary/90">
-                {editingId ? "Atualizar" : "Cadastrar"}
+                {editingId ? "Atualizar Produto" : "Salvar Produto"}
               </Button>
               {editingId && (
                 <Button
@@ -165,7 +183,7 @@ const Products = () => {
                     setFormData({ name: "", price: "" });
                   }}
                 >
-                  Cancelar
+                  Cancelar Edição
                 </Button>
               )}
             </div>
@@ -173,18 +191,18 @@ const Products = () => {
         </CardContent>
       </Card>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
         {products.map((product) => (
           <Card key={product.id}>
             <CardContent className="pt-6">
-              <div className="flex justify-between items-start mb-2">
-                <div>
-                  <h3 className="font-semibold text-foreground">{product.name}</h3>
-                  <p className="text-xl text-primary font-bold">
-                    R$ {product.price.toFixed(2)}
+              <div className="flex justify-between items-start">
+                <div className="flex-1 min-w-0">
+                  <h3 className="font-semibold text-foreground truncate" title={product.name}>{product.name}</h3>
+                  <p className="text-muted-foreground">
+                    {product.price.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
                   </p>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex gap-2 flex-shrink-0 ml-2">
                   <Button
                     variant="outline"
                     size="icon"

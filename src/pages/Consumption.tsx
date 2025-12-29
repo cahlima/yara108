@@ -1,12 +1,25 @@
-import { useEffect, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { useEffect, useState, useCallback } from "react";
+import { db, auth } from "@/lib/firebase"; // Correct import
+import { 
+  collection, 
+  query, 
+  where, 
+  getDocs, 
+  doc, 
+  getDoc, 
+  addDoc, 
+  deleteDoc, 
+  Timestamp, 
+  writeBatch 
+} from "firebase/firestore";
+import { useAuthState } from "react-firebase-hooks/auth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Trash2, Save, Plus, ShoppingBag } from "lucide-react";
+import { Trash2, Save, Plus, ShoppingBag, Loader2 } from "lucide-react";
 import { z } from "zod";
 
 const consumptionSchema = z.object({
@@ -24,6 +37,7 @@ interface Product {
   id: string;
   name: string;
   price: number;
+  active: boolean;
 }
 
 interface Customer {
@@ -31,7 +45,21 @@ interface Customer {
   name: string;
 }
 
+interface DayProductEntry {
+  id: string;
+  product_id: string;
+  custom_price: number;
+  date: string; // Storing date as YYYY-MM-DD string
+  user_id: string;
+}
+
+interface DayProduct extends DayProductEntry {
+  product_name: string;
+  product_default_price: number;
+}
+
 interface ConsumptionItem {
+  id: string;
   customer_id: string;
   customer_name: string;
   product_id: string;
@@ -41,12 +69,8 @@ interface ConsumptionItem {
   subtotal: number;
 }
 
-interface DayProduct {
-  product: Product;
-  customPrice: number;
-}
-
 const Consumption = () => {
+  const [user, loadingUser] = useAuthState(auth);
   const [products, setProducts] = useState<Product[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [consumptionDate, setConsumptionDate] = useState(
@@ -54,48 +78,106 @@ const Consumption = () => {
   );
   const [items, setItems] = useState<ConsumptionItem[]>([]);
   
-  // Produtos do dia
   const [dayProducts, setDayProducts] = useState<DayProduct[]>([]);
   const [selectedDayProduct, setSelectedDayProduct] = useState<string>("");
   const [dayProductPrice, setDayProductPrice] = useState("");
+  const [isDayProductsLoading, setIsDayProductsLoading] = useState(true);
+  const [isSubmittingDayProduct, setIsSubmittingDayProduct] = useState(false);
   
-  // Entrada rápida
   const [selectedCustomer, setSelectedCustomer] = useState("");
   const [quantity, setQuantity] = useState("1");
   const [selectedProduct, setSelectedProduct] = useState("");
 
-  useEffect(() => {
-    fetchData();
+  const fetchDayProducts = useCallback(async (date: string, currentUser: any) => {
+    if (!currentUser) return;
+    setIsDayProductsLoading(true);
+    setDayProducts([]);
+    try {
+      const dayProductsQuery = query(
+        collection(db, "day_products"),
+        where("date", "==", date),
+        where("user_id", "==", currentUser.uid)
+      );
+
+      const querySnapshot = await getDocs(dayProductsQuery);
+      if (querySnapshot.empty) return; // No products for this day
+
+      const dayProductsData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as DayProductEntry));
+      
+      const productIds = dayProductsData.map((dp) => dp.product_id);
+      if (productIds.length === 0) return;
+      
+      const productsQuery = query(collection(db, "products"), where("__name__", "in", productIds));
+      const productsSnapshot = await getDocs(productsQuery);
+      const productsData = productsSnapshot.docs.reduce((acc, doc) => {
+        acc[doc.id] = { id: doc.id, ...doc.data() } as Product;
+        return acc;
+      }, {} as Record<string, Product>);
+
+      const combinedDayProducts = dayProductsData.map(dp => {
+        const productDetails = productsData[dp.product_id];
+        return {
+          ...dp,
+          product_name: productDetails?.name || "Produto não encontrado",
+          product_default_price: productDetails?.price || 0
+        }
+      });
+
+      setDayProducts(combinedDayProducts);
+
+    } catch (error) {
+      if (import.meta.env.DEV) console.error("Erro detalhado em fetchDayProducts: ", error);
+      toast.error("Erro ao buscar produtos do dia.");
+    } finally {
+      setIsDayProductsLoading(false);
+    }
   }, []);
 
+  useEffect(() => {
+    const fetchInitialData = async () => {
+      try {
+        const productsQuery = query(collection(db, "products"), where("active", "==", true));
+        const customersQuery = collection(db, "customers");
+
+        const [productsSnapshot, customersSnapshot] = await Promise.all([
+          getDocs(productsQuery),
+          getDocs(customersQuery),
+        ]);
+
+        const productsData = productsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product));
+        const customersData = customersSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Customer));
+        
+        setProducts(productsData.sort((a,b) => a.name.localeCompare(b.name)));
+        setCustomers(customersData.sort((a,b) => a.name.localeCompare(b.name)));
+
+      } catch (error) {
+        if (import.meta.env.DEV) console.error("Erro ao carregar dados iniciais: ", error);
+        toast.error("Erro ao carregar produtos e clientes");
+      }
+    };
+    
+    fetchInitialData();
+  }, []);
+
+  useEffect(() => {
+    if (user) {
+      fetchDayProducts(consumptionDate, user);
+    }
+  }, [consumptionDate, user, fetchDayProducts]);
+  
   useEffect(() => {
     if (selectedDayProduct) {
       const product = products.find((p) => p.id === selectedDayProduct);
       if (product) {
         setDayProductPrice(product.price.toString());
       }
+    } else {
+      setDayProductPrice("");
     }
   }, [selectedDayProduct, products]);
 
-  const fetchData = async () => {
-    try {
-      const [productsData, customersData] = await Promise.all([
-        supabase.from("products").select("*").eq("active", true).order("name"),
-        supabase.from("customers").select("*").order("name"),
-      ]);
-
-      if (productsData.error) throw productsData.error;
-      if (customersData.error) throw customersData.error;
-
-      setProducts(productsData.data || []);
-      setCustomers(customersData.data || []);
-    } catch (error) {
-      if (import.meta.env.DEV) console.error("Erro ao carregar dados:", error);
-      toast.error("Erro ao carregar dados");
-    }
-  };
-
-  const addDayProduct = () => {
+  const addDayProduct = async () => {
+    if (isSubmittingDayProduct || !user) return;
     if (!selectedDayProduct || !dayProductPrice) {
       toast.error("Selecione um produto e defina o preço");
       return;
@@ -110,29 +192,46 @@ const Consumption = () => {
       return;
     }
 
-    const product = products.find((p) => p.id === selectedDayProduct);
-    if (!product) return;
-
-    const alreadyExists = dayProducts.find((dp) => dp.product.id === product.id);
-    if (alreadyExists) {
+    if (dayProducts.some((dp) => dp.product_id === selectedDayProduct)) {
       toast.error("Produto já está na lista do dia");
       return;
     }
+    
+    setIsSubmittingDayProduct(true);
+    try {
+        await addDoc(collection(db, "day_products"), {
+          product_id: selectedDayProduct,
+          custom_price: parseFloat(dayProductPrice),
+          date: consumptionDate,
+          user_id: user.uid,
+          created_at: Timestamp.now()
+        });
+        
+        await fetchDayProducts(consumptionDate, user);
+        setSelectedDayProduct("");
+        toast.success("Produto do dia adicionado!");
 
-    const newDayProduct: DayProduct = {
-      product,
-      customPrice: parseFloat(dayProductPrice),
-    };
-
-    setDayProducts([...dayProducts, newDayProduct]);
-    setSelectedDayProduct("");
-    setDayProductPrice("");
-    toast.success("Produto do dia adicionado!");
+    } catch(error) {
+        if (import.meta.env.DEV) console.error("Erro ao adicionar produto do dia: ", error);
+        toast.error("Erro ao adicionar produto do dia");
+    } finally {
+      setIsSubmittingDayProduct(false);
+    }
   };
 
-  const removeDayProduct = (productId: string) => {
-    setDayProducts(dayProducts.filter((dp) => dp.product.id !== productId));
-    toast.success("Produto removido da lista do dia");
+  const removeDayProduct = async (dayProductId: string) => {
+    if (isSubmittingDayProduct || !user) return;
+    setIsSubmittingDayProduct(true);
+    try {
+        await deleteDoc(doc(db, "day_products", dayProductId));
+        await fetchDayProducts(consumptionDate, user);
+        toast.success("Produto removido da lista do dia");
+    } catch(error) {
+        if (import.meta.env.DEV) console.error("Erro ao remover produto do dia: ", error);
+        toast.error("Erro ao remover produto do dia");
+    } finally {
+      setIsSubmittingDayProduct(false);
+    }
   };
 
   const addItem = () => {
@@ -151,36 +250,36 @@ const Consumption = () => {
     }
 
     const customer = customers.find((c) => c.id === selectedCustomer);
+    const dayProduct = dayProducts.find((dp) => dp.product_id === selectedProduct);
     
-    // Buscar o preço do produto do dia se estiver na lista
-    const dayProduct = dayProducts.find((dp) => dp.product.id === selectedProduct);
-    const product = products.find((p) => p.id === selectedProduct);
+    if (!customer || !dayProduct) {
+      toast.error("Erro interno: Dados de cliente ou produto do dia não encontrados.");
+      if (import.meta.env.DEV) console.error("Error finding data for item", { customer, dayProduct });
+      return;
+    }
     
-    if (!customer || !product) return;
-
     const qty = parseInt(quantity);
-    const price = dayProduct ? dayProduct.customPrice : product.price;
-    const subtotal = price * qty;
+    const price = dayProduct.custom_price;
+    const subtotal = Number(price) * qty;
 
     const newItem: ConsumptionItem = {
+      id: `${Date.now()}-${Math.random()}`,
       customer_id: customer.id,
       customer_name: customer.name,
-      product_id: product.id,
-      product_name: product.name,
+      product_id: dayProduct.product_id,
+      product_name: dayProduct.product_name,
       quantity: qty,
-      unit_price: price,
+      unit_price: Number(price),
       subtotal,
     };
 
-    setItems([...items, newItem]);
-    // Cliente permanece selecionado
+    setItems(prevItems => [...prevItems, newItem]);
     setQuantity("1");
-    
     toast.success("Item adicionado!");
   };
 
-  const removeItem = (index: number) => {
-    setItems(items.filter((_, i) => i !== index));
+  const removeItem = (itemId: string) => {
+    setItems(prevItems => prevItems.filter((item) => item.id !== itemId));
     toast.success("Item removido");
   };
 
@@ -193,9 +292,15 @@ const Consumption = () => {
       toast.error("Adicione pelo menos um item antes de salvar");
       return;
     }
+    if (!user) {
+        toast.error("Usuário não autenticado");
+        return;
+    }
 
     try {
-      // Agrupar por cliente
+      const batch = writeBatch(db);
+      const recordsRef = collection(db, "consumption_records");
+      
       const itemsByCustomer = items.reduce((acc, item) => {
         if (!acc[item.customer_id]) {
           acc[item.customer_id] = [];
@@ -204,15 +309,12 @@ const Consumption = () => {
         return acc;
       }, {} as Record<string, ConsumptionItem[]>);
 
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("Usuário não autenticado");
-
-      // Criar um registro para cada cliente
-      const records = Object.entries(itemsByCustomer).map(([customerId, customerItems]) => {
+      Object.entries(itemsByCustomer).forEach(([customerId, customerItems]) => {
         const total = customerItems.reduce((sum, item) => sum + item.subtotal, 0);
-        return {
+        const newRecordRef = doc(recordsRef);
+        batch.set(newRecordRef, {
           customer_id: customerId,
-          consumption_date: consumptionDate,
+          consumption_date: Timestamp.fromDate(new Date(consumptionDate + "T12:00:00")),
           items: customerItems.map(item => ({
             product_id: item.product_id,
             product_name: item.product_name,
@@ -222,22 +324,38 @@ const Consumption = () => {
           })),
           total,
           paid: false,
-          user_id: user.id,
-        };
+          user_id: user.uid,
+          created_at: Timestamp.now()
+        });
       });
 
-      const { error } = await supabase.from("consumption_records").insert(records);
+      await batch.commit();
 
-      if (error) throw error;
-
-      toast.success(`${records.length} consumo(s) registrado(s) com sucesso!`);
+      toast.success(`${Object.keys(itemsByCustomer).length} consumo(s) registrado(s) com sucesso!`);
       setItems([]);
     } catch (error) {
-      if (import.meta.env.DEV) console.error("Erro ao registrar consumos:", error);
+      if (import.meta.env.DEV) console.error("Erro ao registrar consumos: ", error);
       toast.error("Erro ao registrar consumos");
     }
   };
 
+  if (loadingUser) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="h-12 w-12 animate-spin text-primary" />
+      </div>
+    )
+  }
+
+  if (!user) {
+    return (
+      <div className="text-center py-12">
+        <h2 className="text-2xl font-semibold">Acesso Negado</h2>
+        <p className="text-muted-foreground mt-2">Você precisa estar autenticado para acessar esta página.</p>
+      </div>
+    )
+  }
+  
   return (
     <div className="space-y-6">
       <div>
@@ -245,7 +363,6 @@ const Consumption = () => {
         <p className="text-muted-foreground">Registre o consumo do dia de forma ágil</p>
       </div>
 
-      {/* Data */}
       <Card className="border-primary/50">
         <CardContent className="pt-6">
           <div className="flex items-center gap-4">
@@ -261,7 +378,6 @@ const Consumption = () => {
         </CardContent>
       </Card>
 
-      {/* Produtos do Dia */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -276,6 +392,7 @@ const Consumption = () => {
               <Select 
                 value={selectedDayProduct} 
                 onValueChange={setSelectedDayProduct}
+                disabled={isSubmittingDayProduct}
               >
                 <SelectTrigger id="day-product">
                   <SelectValue placeholder="Selecione o produto" />
@@ -299,49 +416,63 @@ const Consumption = () => {
                 placeholder="0.00"
                 value={dayProductPrice}
                 onChange={(e) => setDayProductPrice(e.target.value)}
+                disabled={isSubmittingDayProduct}
               />
             </div>
 
             <div className="space-y-2">
               <Label>&nbsp;</Label>
-              <Button onClick={addDayProduct} className="w-full">
-                <Plus className="h-4 w-4 mr-2" />
+              <Button onClick={addDayProduct} className="w-full" disabled={isSubmittingDayProduct || !selectedDayProduct}>
+                {isSubmittingDayProduct ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <Plus className="h-4 w-4 mr-2" />
+                )}
                 Adicionar
               </Button>
             </div>
           </div>
 
-          {dayProducts.length > 0 && (
+          {isDayProductsLoading ? (
+            <div className="text-center p-4 text-muted-foreground">
+              <Loader2 className="h-6 w-6 mx-auto animate-spin" />
+              <p>Carregando produtos...</p>
+            </div>
+          ) : dayProducts.length > 0 ? (
             <div className="space-y-2">
               <Label>Lista de Produtos do Dia:</Label>
               <div className="space-y-2">
                 {dayProducts.map((dp) => (
-                  <div key={dp.product.id} className="flex items-center justify-between p-3 border rounded-lg">
+                  <div key={dp.id} className="flex items-center justify-between p-3 border rounded-lg">
                     <div>
-                      <span className="font-medium">{dp.product.name}</span>
+                      <span className="font-medium">{dp.product_name}</span>
                       <span className="text-muted-foreground ml-2">
-                        R$ {dp.customPrice.toFixed(2)}
+                        R$ {Number(dp.custom_price).toFixed(2)}
                       </span>
                       <span className="text-xs text-muted-foreground ml-2">
-                        (Padrão: R$ {dp.product.price.toFixed(2)})
+                        (Padrão: R$ {Number(dp.product_default_price).toFixed(2)})
                       </span>
                     </div>
                     <Button 
                       variant="ghost" 
                       size="sm"
-                      onClick={() => removeDayProduct(dp.product.id)}
+                      onClick={() => removeDayProduct(dp.id)}
+                      disabled={isSubmittingDayProduct}
                     >
-                      <Trash2 className="h-4 w-4" />
+                      {isSubmittingDayProduct ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
                     </Button>
                   </div>
                 ))}
               </div>
             </div>
+          ) : (
+            <div className="text-center p-4 text-muted-foreground border-dashed border rounded-lg">
+                <p>Nenhum produto do dia definido para esta data.</p>
+            </div>
           )}
         </CardContent>
       </Card>
 
-      {/* Entrada Rápida */}
       <Card>
         <CardHeader>
           <CardTitle>Adicionar Consumo</CardTitle>
@@ -377,22 +508,16 @@ const Consumption = () => {
 
             <div className="space-y-2">
               <Label htmlFor="product">Produto</Label>
-              <Select value={selectedProduct} onValueChange={setSelectedProduct}>
+              <Select value={selectedProduct} onValueChange={setSelectedProduct} disabled={dayProducts.length === 0 || isDayProductsLoading}>
                 <SelectTrigger>
-                  <SelectValue placeholder={dayProducts.length === 0 ? "Adicione produtos do dia primeiro" : "Selecione o produto"} />
+                  <SelectValue placeholder={isDayProductsLoading ? "Carregando..." : dayProducts.length === 0 ? "Adicione produtos do dia" : "Selecione o produto"} />
                 </SelectTrigger>
                 <SelectContent>
-                  {dayProducts.length > 0 ? (
-                    dayProducts.map((dp) => (
-                      <SelectItem key={dp.product.id} value={dp.product.id}>
-                        {dp.product.name} - R$ {dp.customPrice.toFixed(2)}
-                      </SelectItem>
-                    ))
-                  ) : (
-                    <div className="px-2 py-4 text-sm text-muted-foreground text-center">
-                      Adicione produtos do dia acima
-                    </div>
-                  )}
+                  {dayProducts.map((dp) => (
+                    <SelectItem key={dp.product_id} value={dp.product_id}>
+                      {dp.product_name} - R$ {Number(dp.custom_price).toFixed(2)}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -402,6 +527,7 @@ const Consumption = () => {
             type="button" 
             onClick={addItem} 
             className="w-full bg-primary hover:bg-primary/90"
+            disabled={dayProducts.length === 0 || isDayProductsLoading}
           >
             <Plus className="w-4 h-4 mr-2" />
             Adicionar Item
@@ -409,7 +535,6 @@ const Consumption = () => {
         </CardContent>
       </Card>
 
-      {/* Lista de Itens */}
       {items.length > 0 && (
         <Card className="border-success/50">
           <CardHeader>
@@ -417,9 +542,9 @@ const Consumption = () => {
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="space-y-2 max-h-96 overflow-y-auto">
-              {items.map((item, index) => (
+              {items.map((item) => (
                 <div
-                  key={index}
+                  key={item.id}
                   className="flex justify-between items-center p-4 bg-muted rounded-lg hover:bg-muted/80 transition-colors"
                 >
                   <div className="flex-1">
@@ -436,7 +561,7 @@ const Consumption = () => {
                       type="button"
                       variant="destructive"
                       size="icon"
-                      onClick={() => removeItem(index)}
+                      onClick={() => removeItem(item.id)}
                     >
                       <Trash2 className="w-4 h-4" />
                     </Button>

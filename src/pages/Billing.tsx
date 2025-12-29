@@ -1,15 +1,36 @@
 import { useState, useEffect } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { db } from "@/lib/firebase";
+import {
+  collection,
+  getDocs,
+  query,
+  where,
+  orderBy,
+} from "firebase/firestore";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { toast } from "@/hooks/use-toast";
+import { toast } from "sonner";
 import { Calendar, DollarSign, Share2 } from "lucide-react";
 
 interface Customer {
   id: string;
   name: string;
+  phone?: string; // Add phone for WhatsApp sharing
 }
 
 interface ConsumptionRecord {
@@ -25,68 +46,57 @@ interface ConsumptionRecord {
 
 const Billing = () => {
   const [customers, setCustomers] = useState<Customer[]>([]);
-  const [selectedCustomer, setSelectedCustomer] = useState<string>("");
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string>("");
   const [records, setRecords] = useState<ConsumptionRecord[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loadingRecords, setLoadingRecords] = useState(false);
 
   useEffect(() => {
     fetchCustomers();
   }, []);
 
   useEffect(() => {
-    if (selectedCustomer) {
-      fetchRecords();
+    if (selectedCustomerId) {
+      fetchConsumptionRecords();
+    } else {
+      setRecords([]);
     }
-  }, [selectedCustomer]);
+  }, [selectedCustomerId]);
 
   const fetchCustomers = async () => {
-    const { data, error } = await supabase
-      .from("customers")
-      .select("*")
-      .order("name");
-
-    if (error) {
-      toast({
-        title: "Erro ao carregar clientes",
-        description: error.message,
-        variant: "destructive",
-      });
-      return;
+    try {
+      const customersRef = collection(db, "customers");
+      const q = query(customersRef, orderBy("name"));
+      const querySnapshot = await getDocs(q);
+      const customersData = querySnapshot.docs.map(
+        (doc) => ({ id: doc.id, ...doc.data() } as Customer)
+      );
+      setCustomers(customersData);
+    } catch (error) {
+      console.error("Error fetching customers: ", error);
+      toast.error("Erro ao carregar clientes.");
     }
-
-    setCustomers(data || []);
   };
 
-  const fetchRecords = async () => {
-    setLoading(true);
-    const { data, error } = await supabase
-      .from("consumption_records")
-      .select("*")
-      .eq("customer_id", selectedCustomer)
-      .order("consumption_date", { ascending: false });
-
-    if (error) {
-      toast({
-        title: "Erro ao carregar registros",
-        description: error.message,
-        variant: "destructive",
-      });
-      setLoading(false);
-      return;
+  const fetchConsumptionRecords = async () => {
+    setLoadingRecords(true);
+    try {
+      const recordsRef = collection(db, "consumption_records");
+      const q = query(
+        recordsRef,
+        where("customer_id", "==", selectedCustomerId),
+        orderBy("consumption_date", "desc")
+      );
+      const querySnapshot = await getDocs(q);
+      const recordsData = querySnapshot.docs.map(
+        (doc) => doc.data() as ConsumptionRecord
+      );
+      setRecords(recordsData);
+    } catch (error) {
+      console.error("Error fetching records: ", error);
+      toast.error("Erro ao carregar registros de consumo.");
+    } finally {
+      setLoadingRecords(false);
     }
-
-    const formattedData = (data || []).map((record) => ({
-      ...record,
-      items: record.items as unknown as Array<{
-        product_name: string;
-        quantity: number;
-        unit_price: number;
-        subtotal: number;
-      }>,
-    }));
-
-    setRecords(formattedData);
-    setLoading(false);
   };
 
   const calculateTotal = () => {
@@ -94,44 +104,52 @@ const Billing = () => {
   };
 
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString("pt-BR");
+     // Add a time to the date string to ensure it's parsed as local time
+     return new Date(dateString + 'T00:00:00').toLocaleDateString("pt-BR");
   };
 
   const formatCurrency = (value: number) => {
-    return value.toLocaleString("pt-BR", {
+    return (value || 0).toLocaleString("pt-BR", {
       style: "currency",
       currency: "BRL",
     });
   };
 
   const shareWhatsApp = () => {
-    if (!selectedCustomer || records.length === 0) {
-      toast({
-        title: "Nenhum dado para compartilhar",
-        description: "Selecione um cliente com registros",
-        variant: "destructive",
+    if (!selectedCustomerId || records.length === 0) {
+      toast.warning("Nenhum dado para compartilhar", {
+        description: "Selecione um cliente com registros.",
       });
       return;
     }
 
-    const customer = customers.find((c) => c.id === selectedCustomer);
+    const customer = customers.find((c) => c.id === selectedCustomerId);
+    if (!customer) return;
+
     const total = calculateTotal();
-    
-    let message = `*Fechamento Mensal - ${customer?.name}*\n\n`;
-    
+
+    let message = `*Fechamento Mensal - ${customer.name}*\n\n`;
+
     records.forEach((record) => {
-      message += `📅 *${formatDate(record.consumption_date)}* - ${formatCurrency(Number(record.total))}\n`;
-      record.items.forEach((item) => {
-        message += `   • ${item.product_name} - ${item.quantity}x ${formatCurrency(Number(item.unit_price))} = ${formatCurrency(Number(item.subtotal))}\n`;
+      message += `📅 *${formatDate(
+        record.consumption_date
+      )}* - ${formatCurrency(Number(record.total))}\n`;
+      (record.items || []).forEach((item) => {
+        message += `   • ${item.quantity}x ${item.product_name} (${formatCurrency(Number(item.unit_price))}) = ${formatCurrency(Number(item.subtotal))}\n`;
       });
       message += `\n`;
     });
-    
-    message += `\n💰 *Total: ${formatCurrency(total)}*`;
-    
+
+    message += `\n💰 *Total Geral: ${formatCurrency(total)}*`;
+
     const encodedMessage = encodeURIComponent(message);
-    const whatsappUrl = `https://wa.me/?text=${encodedMessage}`;
-    window.location.href = whatsappUrl;
+    // Use customer's phone if available
+    const phone = customer.phone?.replace(/\D/g, "");
+    const url = phone 
+      ? `https://wa.me/55${phone}?text=${encodedMessage}`
+      : `https://wa.me/?text=${encodedMessage}`;
+
+    window.open(url, "_blank");
   };
 
   return (
@@ -148,7 +166,7 @@ const Billing = () => {
           <CardTitle>Selecionar Cliente</CardTitle>
         </CardHeader>
         <CardContent>
-          <Select value={selectedCustomer} onValueChange={setSelectedCustomer}>
+          <Select value={selectedCustomerId} onValueChange={setSelectedCustomerId}>
             <SelectTrigger>
               <SelectValue placeholder="Selecione um cliente" />
             </SelectTrigger>
@@ -163,14 +181,14 @@ const Billing = () => {
         </CardContent>
       </Card>
 
-      {selectedCustomer && (
+      {selectedCustomerId && (
         <>
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center justify-between">
                 <span>Resumo do Período</span>
                 <div className="flex items-center gap-4">
-                  <span className="text-2xl text-primary">
+                  <span className="text-2xl text-primary font-bold">
                     {formatCurrency(calculateTotal())}
                   </span>
                   <Button onClick={shareWhatsApp} size="sm" className="gap-2">
@@ -187,13 +205,13 @@ const Billing = () => {
               <CardTitle>Consumo por Data</CardTitle>
             </CardHeader>
             <CardContent>
-              {loading ? (
+              {loadingRecords ? (
                 <p className="text-center text-muted-foreground py-8">
                   Carregando...
                 </p>
               ) : records.length === 0 ? (
                 <p className="text-center text-muted-foreground py-8">
-                  Nenhum registro encontrado para este cliente
+                  Nenhum registro encontrado para este cliente.
                 </p>
               ) : (
                 <div className="space-y-6">
@@ -224,7 +242,7 @@ const Billing = () => {
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {record.items.map((item, itemIndex) => (
+                          {(record.items || []).map((item, itemIndex) => (
                             <TableRow key={itemIndex}>
                               <TableCell>{item.product_name}</TableCell>
                               <TableCell className="text-center">

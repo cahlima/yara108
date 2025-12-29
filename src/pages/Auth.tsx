@@ -1,12 +1,23 @@
 import { useState, useEffect } from "react";
-import { supabase } from "@/integrations/supabase/client";
 import { useNavigate } from "react-router-dom";
+import { z } from "zod";
+import { toast } from "sonner";
+
+import { app, db } from "@/lib/firebase";
+import {
+  getAuth,
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  sendPasswordResetEmail,
+  confirmPasswordReset,
+} from "firebase/auth";
+import { doc, setDoc, getDoc } from "firebase/firestore";
+
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { toast } from "sonner";
-import { z } from "zod";
 
 const authSchema = z.object({
   email: z.string().email("Email inválido").min(1, "Email é obrigatório"),
@@ -17,6 +28,10 @@ const emailSchema = z.object({
   email: z.string().email("Email inválido").min(1, "Email é obrigatório"),
 });
 
+const passwordSchema = z.object({
+  password: z.string().min(6, "Senha deve ter no mínimo 6 caracteres"),
+});
+
 type AuthMode = "login" | "signup" | "forgot" | "reset";
 
 export default function Auth() {
@@ -25,35 +40,54 @@ export default function Auth() {
   const [password, setPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [oobCode, setOobCode] = useState<string | null>(null);
   const navigate = useNavigate();
+  const auth = getAuth(app);
 
   useEffect(() => {
-    // Check URL hash for recovery token
-    const hashParams = new URLSearchParams(window.location.hash.substring(1));
-    const type = hashParams.get("type");
-    const accessToken = hashParams.get("access_token");
-    
-    if (type === "recovery" && accessToken) {
+    const params = new URLSearchParams(window.location.search);
+    const paramMode = params.get('mode');
+    const paramOobCode = params.get('oobCode');
+
+    if (paramMode === 'resetPassword' && paramOobCode) {
       setMode("reset");
-      return;
+      setOobCode(paramOobCode);
     }
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === "PASSWORD_RECOVERY") {
-        setMode("reset");
-      } else if (session && mode !== "reset") {
-        navigate("/");
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        const adminDocRef = doc(db, "admins", user.uid);
+        const adminDoc = await getDoc(adminDocRef);
+        
+        // Check for customer approval (if they aren't an admin)
+        if (adminDoc.exists()) {
+            navigate("/");
+        } else {
+            const userDocRef = doc(db, "customers", user.uid);
+            const userDoc = await getDoc(userDocRef);
+            if (userDoc.exists() && userDoc.data().approved) {
+              navigate("/");
+            } else {
+              navigate("/pending-approval");
+            }
+        }
       }
     });
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session && mode !== "reset") {
-        navigate("/");
-      }
-    });
+    return () => unsubscribe();
+  }, [auth, navigate]);
 
-    return () => subscription.unsubscribe();
-  }, [navigate, mode]);
+  const handleAuthError = (error: any) => {
+    if (error.code === 'auth/invalid-email') {
+        toast.error("Formato de email inválido.");
+    } else if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
+        toast.error("Email ou senha incorretos.");
+    } else if (error.code === 'auth/email-already-in-use') {
+        toast.error("Este email já está cadastrado.");
+    } else {
+        toast.error(error.message || "Ocorreu um erro.");
+    }
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -62,75 +96,55 @@ export default function Auth() {
     try {
       if (mode === "forgot") {
         const validatedData = emailSchema.parse({ email });
-        const redirectUrl = window.location.origin + '/auth';
-        const { error } = await supabase.auth.resetPasswordForEmail(validatedData.email, {
-          redirectTo: redirectUrl,
-        });
-
-        if (error) {
-          toast.error(error.message);
-          return;
-        }
-
+        await sendPasswordResetEmail(auth, validatedData.email);
         toast.success("Email de recuperação enviado! Verifique sua caixa de entrada.");
         setMode("login");
+
       } else if (mode === "reset") {
-        const validatedData = authSchema.parse({ email: "placeholder@email.com", password: newPassword });
-        const { error } = await supabase.auth.updateUser({
-          password: validatedData.password,
-        });
-
-        if (error) {
-          toast.error(error.message);
-          return;
+        if (!oobCode) {
+            toast.error("Link de redefinição inválido ou expirado.");
+            return;
         }
-
+        const validatedData = passwordSchema.parse({ password: newPassword });
+        await confirmPasswordReset(auth, oobCode, validatedData.password);
         toast.success("Senha atualizada com sucesso!");
-        navigate("/");
+        navigate("/auth");
+
       } else if (mode === "login") {
         const validatedData = authSchema.parse({ email, password });
-        const { error } = await supabase.auth.signInWithPassword({
-          email: validatedData.email,
-          password: validatedData.password,
-        });
+        await signInWithEmailAndPassword(auth, validatedData.email, validatedData.password);
+        // onAuthStateChanged will handle navigation
 
-        if (error) {
-          if (error.message.includes("Invalid login credentials")) {
-            toast.error("Email ou senha incorretos");
-          } else {
-            toast.error(error.message);
-          }
-          return;
-        }
-
-        toast.success("Login realizado com sucesso!");
-      } else {
+      } else { // signup
         const validatedData = authSchema.parse({ email, password });
-        const { error } = await supabase.auth.signUp({
-          email: validatedData.email,
-          password: validatedData.password,
-          options: {
-            emailRedirectTo: `${window.location.origin}/`,
-          },
+        const userCredential = await createUserWithEmailAndPassword(auth, validatedData.email, validatedData.password);
+        const user = userCredential.user;
+        const isAdminEmail = user.email === "caciabad@gmail.com";
+
+        // Create user profile in Firestore
+        await setDoc(doc(db, "customers", user.uid), {
+            id: user.uid,
+            email: user.email,
+            name: user.email.split('@')[0],
+            approved: isAdminEmail, // Auto-approve admin
+            created_at: new Date().toISOString(),
         });
 
-        if (error) {
-          if (error.message.includes("User already registered")) {
-            toast.error("Este email já está cadastrado");
-          } else {
-            toast.error(error.message);
-          }
-          return;
+        if (isAdminEmail) {
+            await setDoc(doc(db, "admins", user.uid), {
+                role: "admin",
+                created_at: new Date().toISOString(),
+            });
+            toast.success("Conta de administrador criada com sucesso! Você será redirecionado.");
+        } else {
+            toast.success("Cadastro realizado! Aguarde a aprovação do administrador.");
         }
-
-        toast.success("Cadastro realizado! Aguarde a aprovação do administrador para acessar o sistema.");
-        setMode("login");
       }
-    } catch (error) {
+    } catch (error: any) {
       if (error instanceof z.ZodError) {
         toast.error(error.errors[0].message);
       } else {
-        toast.error("Erro ao processar requisição");
+        handleAuthError(error);
       }
     } finally {
       setLoading(false);

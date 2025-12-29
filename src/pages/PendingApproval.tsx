@@ -1,15 +1,17 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { supabase } from "@/integrations/supabase/client";
+import { app } from "@/lib/firebase";
+import { getAuth, signOut } from "firebase/auth";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { Clock } from "lucide-react";
 
 export default function PendingApproval() {
   const navigate = useNavigate();
+  const auth = getAuth(app);
 
   const handleLogout = async () => {
-    await supabase.auth.signOut();
+    await signOut(auth);
     toast.success("Logout realizado");
     navigate("/auth");
   };
