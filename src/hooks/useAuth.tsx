@@ -7,8 +7,7 @@ import {
 } from 'react';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
-// --- CORREÇÃO: Padronizando import para usar alias --- 
-import { auth, db } from '@/lib/firebase'; 
+import { auth, db } from '@/lib/firebase';
 
 interface AuthContextType {
   user: User | null;
@@ -24,36 +23,39 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // --- CORREÇÃO: Função async nomeada para clareza e compatibilidade com Vite ---
-    const checkUserAuth = async (currentUser: User | null) => {
-      setLoading(true);
+    console.log('[Auth] Hook montado, configurando listener...');
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      console.log('[Auth] onAuthStateChanged acionado. Usuário:', currentUser ? currentUser.uid : 'null');
       setUser(currentUser);
-
-      if (!currentUser) {
+      
+      if (currentUser) {
+        try {
+          console.log('[Auth] Verificando status de admin...');
+          const adminRef = doc(db, 'admins', currentUser.uid);
+          const adminSnap = await getDoc(adminRef);
+          const isAdminUser = adminSnap.exists();
+          setIsAdmin(isAdminUser);
+          console.log('[Auth] Status de admin verificado:', isAdminUser);
+        } catch (error) {
+          console.error('[Auth] Erro ao verificar status de admin:', error);
+          setIsAdmin(false);
+        }
+      } else {
         setIsAdmin(false);
-        setLoading(false);
-        return;
+        console.log('[Auth] Usuário nulo, isAdmin definido como false.');
       }
+      
+      console.log('[Auth] Definindo loading como false.');
+      setLoading(false);
+    });
 
-      // Se houver um usuário, verifica o status de admin no Firestore
-      try {
-        const adminRef = doc(db, 'admins', currentUser.uid);
-        const adminSnap = await getDoc(adminRef);
-        setIsAdmin(adminSnap.exists());
-      } catch (error) {
-        console.error('Erro ao verificar status de admin:', error);
-        setIsAdmin(false);
-      } finally {
-        setLoading(false);
-      }
+    return () => {
+      console.log('[Auth] Hook desmontado, limpando listener.');
+      unsubscribe();
     };
-
-    // Passa a referência da função nomeada para o listener
-    const unsubscribe = onAuthStateChanged(auth, checkUserAuth);
-
-    // Função de limpeza para remover o listener quando o componente desmontar
-    return () => unsubscribe();
   }, []);
+
+  console.log('[Auth] Renderizando Provider com estado:', { loading, user: user?.uid, isAdmin });
 
   return (
     <AuthContext.Provider value={{ user, isAdmin, loading }}>
