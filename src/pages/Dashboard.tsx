@@ -1,13 +1,16 @@
-import { useEffect, useState } from "react";
+
+import { useEffect, useState, useCallback } from "react";
 import { db } from "@/lib/firebase";
 import { collection, getDocs, query, where } from "firebase/firestore";
+import { useAuth } from "@/hooks/useAuth"; // 1. Importar o useAuth
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { DollarSign, Users, TrendingUp, Search } from "lucide-react";
+import { DollarSign, Users, TrendingUp, Search, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
+// Interfaces permanecem as mesmas
 interface Stats {
   totalPending: number;
   totalPaid: number;
@@ -26,7 +29,9 @@ interface DailyGroup {
   dayTotal: number;
 }
 
+
 const Dashboard = () => {
+  const { loading: authLoading } = useAuth(); // 2. Usar o hook e obter o status de loading da autenticação
   const [stats, setStats] = useState<Stats>({
     totalPending: 0,
     totalPaid: 0,
@@ -38,11 +43,8 @@ const Dashboard = () => {
   const [isFiltered, setIsFiltered] = useState(false);
   const [dailyGroups, setDailyGroups] = useState<DailyGroup[]>([]);
 
-  useEffect(() => {
-    fetchStats();
-  }, []);
-
-  const fetchStats = async () => {
+  const fetchStats = useCallback(async () => {
+    setLoading(true);
     try {
       const consumptionRecordsRef = collection(db, "consumption_records");
       const customersRef = collection(db, "customers");
@@ -73,7 +75,14 @@ const Dashboard = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  // 3. O useEffect agora depende de `authLoading`
+  useEffect(() => {
+    if (!authLoading) {
+      fetchStats();
+    }
+  }, [authLoading, fetchStats]);
 
   const handleFilter = async () => {
     if (!startDate || !endDate) {
@@ -96,11 +105,13 @@ const Dashboard = () => {
       
       const customersMap = new Map<string, string>();
       if (customerIds.length > 0) {
-        const customersQuery = query(collection(db, "customers"), where("id", "in", customerIds));
-        const customersSnapshot = await getDocs(customersQuery);
+        // Esta parte pode ser otimizada se houver muitos customerIds
+        // Por enquanto, mantemos a lógica para garantir a correção.
+        const customersSnapshot = await getDocs(collection(db, "customers"));
         customersSnapshot.forEach(doc => {
-          const customer = doc.data();
-          customersMap.set(customer.id, customer.name);
+            if(customerIds.includes(doc.id)){
+                 customersMap.set(doc.id, doc.data().name);
+            }
         });
       }
 
@@ -128,7 +139,7 @@ const Dashboard = () => {
         dayTotal: records.reduce((sum, r) => sum + r.total, 0),
       }));
 
-      setDailyGroups(groups);
+      setDailyGroups(groups.sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
       setIsFiltered(true);
     } catch (error) {
       if (import.meta.env.DEV) console.error("Erro ao filtrar:", error);
@@ -143,50 +154,52 @@ const Dashboard = () => {
     setEndDate("");
     setIsFiltered(false);
     setDailyGroups([]);
+    fetchStats(); // Recarrega as estatísticas gerais ao limpar o filtro
   };
-
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString + "T00:00:00");
-    return date.toLocaleDateString("pt-BR", {
-      weekday: "long",
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-    });
-  };
-
-  const formatCurrency = (value: number) => {
-    return value.toLocaleString("pt-BR", {
-      style: "currency",
-      currency: "BRL",
-    });
-  };
+  
+    // Funções de formatação (formatDate, formatCurrency) permanecem as mesmas
+    const formatDate = (dateString: string) => {
+        const date = new Date(dateString + 'T00:00:00');
+        return date.toLocaleDateString("pt-BR", {
+        weekday: 'long',
+        day: '2-digit',
+        month: '2-digit',
+        });
+    };
+    
+    const formatCurrency = (value: number) => {
+        return value.toLocaleString("pt-BR", {
+        style: "currency",
+        currency: "BRL",
+        });
+    };
 
   const statsCards = [
     {
       title: "Pendente",
       value: formatCurrency(stats.totalPending),
       icon: DollarSign,
-      color: "text-warning",
+      color: "text-orange-500",
     },
     {
       title: "Recebido",
       value: formatCurrency(stats.totalPaid),
       icon: TrendingUp,
-      color: "text-success",
+      color: "text-green-500",
     },
     {
       title: "Clientes",
       value: stats.totalCustomers,
       icon: Users,
-      color: "text-accent",
+      color: "text-blue-500",
     },
   ];
 
-  if (loading && !isFiltered) {
+  // 4. Mostrar um loader enquanto a autenticação ou o carregamento inicial estiverem acontecendo.
+  if (authLoading || (loading && !isFiltered)) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="text-muted-foreground">Carregando...</div>
+        <Loader2 className="h-12 w-12 animate-spin text-primary" />
       </div>
     );
   }
@@ -224,8 +237,8 @@ const Dashboard = () => {
             </div>
             <div className="flex gap-2">
               <Button onClick={handleFilter} disabled={loading}>
-                <Search className="w-4 h-4 mr-2" />
-                Ir
+                {loading && isFiltered ? <Loader2 className="h-4 w-4 animate-spin mr-2"/> : <Search className="w-4 h-4 mr-2" />}
+                Filtrar
               </Button>
               {isFiltered && (
                 <Button variant="outline" onClick={clearFilter}>
@@ -240,7 +253,7 @@ const Dashboard = () => {
       {!isFiltered && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {statsCards.map((stat) => (
-            <Card key={stat.title} className="border-border">
+            <Card key={stat.title}>
               <CardHeader className="flex flex-row items-center justify-between pb-2">
                 <CardTitle className="text-sm font-medium text-muted-foreground">
                   {stat.title}
@@ -257,7 +270,11 @@ const Dashboard = () => {
 
       {isFiltered && (
         <div className="space-y-6">
-          {dailyGroups.length === 0 ? (
+          {loading ? (
+             <div className="flex items-center justify-center h-64">
+                <Loader2 className="h-12 w-12 animate-spin text-primary" />
+            </div>
+          ) : dailyGroups.length === 0 ? (
             <Card>
               <CardContent className="py-8 text-center text-muted-foreground">
                 Nenhum registro encontrado no período selecionado.
@@ -267,8 +284,9 @@ const Dashboard = () => {
             dailyGroups.map((group) => (
               <Card key={group.date}>
                 <CardHeader>
-                  <CardTitle className="text-lg capitalize">
-                    {formatDate(group.date)}
+                  <CardTitle className="text-lg capitalize flex justify-between items-center">
+                    <span>{formatDate(group.date)}</span>
+                    <span className="text-sm font-medium text-muted-foreground">Total do dia: {formatCurrency(group.dayTotal)}</span>
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -276,7 +294,7 @@ const Dashboard = () => {
                     {group.records.map((record, index) => (
                       <div
                         key={index}
-                        className="flex justify-between items-center py-2 border-b border-border last:border-0"
+                        className="flex justify-between items-center py-2 border-b last:border-0"
                       >
                         <span className="text-foreground">{record.customerName}</span>
                         <span className="font-medium text-foreground">
@@ -284,12 +302,6 @@ const Dashboard = () => {
                         </span>
                       </div>
                     ))}
-                    <div className="flex justify-between items-center pt-3 border-t-2 border-primary">
-                      <span className="font-bold text-foreground">Total do Dia</span>
-                      <span className="font-bold text-primary text-lg">
-                        {formatCurrency(group.dayTotal)}
-                      </span>
-                    </div>
                   </div>
                 </CardContent>
               </Card>

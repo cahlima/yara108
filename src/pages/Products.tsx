@@ -1,33 +1,24 @@
-import { useEffect, useState } from "react";
+
+import { useEffect, useState, useCallback } from "react";
 import { db } from "@/lib/firebase";
-import {
-  collection,
-  getDocs,
-  addDoc,
-  updateDoc,
-  doc,
-  query,
-  where,
-  orderBy,
-} from "firebase/firestore";
+import { collection, addDoc, getDocs, doc, updateDoc, query } from "firebase/firestore";
+import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
-import { Trash2, Edit } from "lucide-react";
+import { PlusCircle, Loader2, Edit, CheckSquare, XSquare } from "lucide-react";
 import { z } from "zod";
-import { useAuth } from "@/hooks/useAuth";
 
+// Esquema de validação com tratamento para vírgula
 const productSchema = z.object({
-  name: z.string().trim().min(1, "Nome do produto é obrigatório").max(100, "Nome deve ter no máximo 100 caracteres"),
-  price: z.preprocess(
-    (val) => String(val).replace(",", "."), // Allow comma as decimal separator
-    z.string().refine((val) => {
-        const num = parseFloat(val);
-        return !isNaN(num) && num > 0 && num <= 999999;
-    }, "Preço deve ser um valor válido maior que zero")
-  ),
+  name: z.string().min(3, "Nome deve ter pelo menos 3 caracteres").max(50, "Nome deve ter no máximo 50 caracteres"),
+  price: z.string().refine(val => {
+    const formattedVal = val.replace(",", ".");
+    return !isNaN(parseFloat(formattedVal)) && parseFloat(formattedVal) > 0;
+  }, "Preço deve ser um número positivo válido"),
 });
 
 interface Product {
@@ -38,186 +29,192 @@ interface Product {
 }
 
 const Products = () => {
+  const { user, loading: authLoading } = useAuth();
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
-  const [formData, setFormData] = useState({ name: "", price: "" });
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const { isAdmin, loading: authLoading } = useAuth();
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [formData, setFormData] = useState({ name: '', price: '', active: true });
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const fetchProducts = useCallback(async () => {
+    if (!user) return;
+    setLoading(true);
+    try {
+      const q = query(collection(db, "products"));
+      const querySnapshot = await getDocs(q);
+      const productsData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product));
+      setProducts(productsData.sort((a, b) => a.name.localeCompare(b.name)));
+    } catch (error) {
+      console.error("Erro ao carregar produtos:", error);
+      toast.error("Erro ao carregar produtos");
+    } finally {
+      setLoading(false);
+    }
+  }, [user]);
 
   useEffect(() => {
     if (!authLoading) {
       fetchProducts();
     }
-  }, [authLoading]);
+  }, [authLoading, fetchProducts]);
 
-  const fetchProducts = async () => {
-    setLoading(true);
+  const handleDialogChange = (open: boolean) => {
+    if (!open) {
+      setEditingProduct(null);
+      setFormData({ name: '', price: '', active: true });
+      setErrors({});
+    }
+    setIsDialogOpen(open);
+  };
+
+  const handleEdit = (product: Product) => {
+    setEditingProduct(product);
+    // Formata o preço para o padrão brasileiro (com vírgula) ao abrir a edição
+    setFormData({ name: product.name, price: product.price.toString().replace('.', ','), active: product.active });
+    setIsDialogOpen(true);
+  };
+
+  const handleToggleActive = async (product: Product) => {
     try {
-      const productsRef = collection(db, "products");
-      const q = query(productsRef, where("active", "==", true), orderBy("name"));
-      const querySnapshot = await getDocs(q);
-      const productsList = querySnapshot.docs.map(
-        (doc) => ({ id: doc.id, ...doc.data() } as Product)
-      );
-      setProducts(productsList);
+      const productRef = doc(db, "products", product.id);
+      await updateDoc(productRef, { active: !product.active });
+      toast.success(`Produto ${product.name} ${!product.active ? 'ativado' : 'desativado'}`);
+      await fetchProducts();
     } catch (error) {
-      if (import.meta.env.DEV) console.error("Erro ao carregar produtos:", error);
-      toast.error("Erro ao carregar produtos");
-    } finally {
-      setLoading(false);
+       console.error("Erro ao alterar status:", error);
+      toast.error("Erro ao alterar status do produto");
     }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!user) return;
+    setIsSubmitting(true);
+    setErrors({});
+
+    const validation = productSchema.safeParse(formData);
+    if (!validation.success) {
+      const newErrors: Record<string, string> = {};
+      validation.error.errors.forEach(err => {
+        newErrors[err.path[0]] = err.message;
+      });
+      setErrors(newErrors);
+      setIsSubmitting(false);
+      return;
+    }
 
     try {
-      const validatedData = productSchema.parse(formData);
-      const priceAsNumber = parseFloat(validatedData.price);
+      // **A CORREÇÃO PRINCIPAL ESTÁ AQUI**
+      // Garante que a vírgula seja trocada por ponto ANTES de salvar
+      const priceString = validation.data.price.replace(',', '.');
+      const priceNumber = parseFloat(priceString);
 
-      if (editingId) {
-        const productRef = doc(db, "products", editingId);
-        await updateDoc(productRef, {
-          name: validatedData.name,
-          price: priceAsNumber,
-        });
+      const dataToSave = {
+        name: validation.data.name,
+        price: priceNumber,
+        active: formData.active,
+      };
+
+      if (editingProduct) {
+        const productRef = doc(db, "products", editingProduct.id);
+        await updateDoc(productRef, dataToSave);
         toast.success("Produto atualizado com sucesso!");
       } else {
-        await addDoc(collection(db, "products"), {
-          name: validatedData.name,
-          price: priceAsNumber,
-          active: true,
-          created_at: new Date().toISOString(),
-        });
-        toast.success("Produto cadastrado com sucesso!");
+        await addDoc(collection(db, "products"), dataToSave);
+        toast.success("Produto adicionado com sucesso!");
       }
+      
+      await fetchProducts();
+      handleDialogChange(false);
 
-      setFormData({ name: "", price: "" });
-      setEditingId(null);
-      fetchProducts();
     } catch (error) {
-      if (error instanceof z.ZodError) {
-        error.errors.forEach((err) => toast.error(err.message));
-      } else {
-        if (import.meta.env.DEV) console.error("Erro ao salvar produto:", error);
-        toast.error("Erro ao salvar produto");
-      }
-    }
-  };
-
-  const handleEdit = (product: Product) => {
-    setFormData({ name: product.name, price: product.price.toString().replace(".", ",") });
-    setEditingId(product.id);
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  };
-
-  const handleDelete = async (id: string) => {
-    if (!confirm("Deseja realmente desativar este produto?")) return;
-
-    try {
-      const productRef = doc(db, "products", id);
-      await updateDoc(productRef, { active: false });
-      toast.success("Produto desativado com sucesso!");
-      fetchProducts();
-    } catch (error) {
-      if (import.meta.env.DEV) console.error("Erro ao desativar produto:", error);
-      toast.error("Erro ao desativar produto");
+      console.error("Erro ao salvar produto:", error);
+      toast.error("Erro ao salvar produto");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   if (loading || authLoading) {
-    return <div className="text-center py-8">Carregando...</div>;
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="h-12 w-12 animate-spin text-primary" />
+      </div>
+    );
   }
-
+  
+  // O input do preço agora é do tipo "text" para melhor controle da formatação
   return (
-    <div className="space-y-8">
-      <div>
-        <h2 className="text-3xl font-bold text-foreground mb-2">Produtos</h2>
-        <p className="text-muted-foreground">Gerencie os produtos disponíveis para consumo.</p>
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-3xl font-bold text-foreground">Gerenciar Produtos</h2>
+          <p className="text-muted-foreground">Adicione, edite e organize seus produtos.</p>
+        </div>
+        <Dialog open={isDialogOpen} onOpenChange={handleDialogChange}>
+          <DialogTrigger asChild>
+            <Button><PlusCircle className="w-4 h-4 mr-2" />Novo Produto</Button>
+          </DialogTrigger>
+          <DialogContent className="sm:max-w-[425px]">
+            <DialogHeader>
+              <DialogTitle>{editingProduct ? "Editar Produto" : "Novo Produto"}</DialogTitle>
+            </DialogHeader>
+            <form onSubmit={handleSubmit}>
+              <div className="grid gap-4 py-4">
+                <div className="space-y-2">
+                  <Label htmlFor="name">Nome</Label>
+                  <Input id="name" value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} />
+                  {errors.name && <p className="text-xs text-destructive">{errors.name}</p>}
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="price">Preço (R$)</Label>
+                  <Input
+                    id="price"
+                    type="text" // Alterado para text para aceitar vírgula
+                    inputMode="decimal" // Melhora a experiência em mobile
+                    placeholder="Ex: 7,50"
+                    value={formData.price}
+                    onChange={(e) => setFormData({ ...formData, price: e.target.value })}
+                  />
+                  {errors.price && <p className="text-xs text-destructive">{errors.price}</p>}
+                </div>
+                 <div className="flex items-center space-x-2">
+                    <Switch id="active-status" checked={formData.active} onCheckedChange={(checked) => setFormData({ ...formData, active: checked })} />
+                    <Label htmlFor="active-status">Ativo</Label>
+                </div>
+              </div>
+              <DialogFooter>
+                <Button type="submit" disabled={isSubmitting}>{isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Salvar"}</Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>{editingId ? "Editar Produto" : "Cadastrar Novo Produto"}</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="name">Nome do Produto</Label>
-                <Input
-                  id="name"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  placeholder="Ex: Água Mineral 500ml"
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="price">Preço (R$)</Label>
-                <Input
-                  id="price"
-                  value={formData.price}
-                  onChange={(e) => setFormData({ ...formData, price: e.target.value })}
-                  placeholder="Ex: 2,50"
-                  required
-                />
-              </div>
-            </div>
-            <div className="flex gap-2">
-              <Button type="submit" className="bg-primary hover:bg-primary/90">
-                {editingId ? "Atualizar Produto" : "Salvar Produto"}
-              </Button>
-              {editingId && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => {
-                    setEditingId(null);
-                    setFormData({ name: "", price: "" });
-                  }}
-                >
-                  Cancelar Edição
-                </Button>
-              )}
-            </div>
-          </form>
-        </CardContent>
-      </Card>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-        {products.map((product) => (
-          <Card key={product.id}>
-            <CardContent className="pt-6">
-              <div className="flex justify-between items-start">
-                <div className="flex-1 min-w-0">
-                  <h3 className="font-semibold text-foreground truncate" title={product.name}>{product.name}</h3>
-                  <p className="text-muted-foreground">
-                    {product.price.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
-                  </p>
-                </div>
-                <div className="flex gap-2 flex-shrink-0 ml-2">
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    onClick={() => handleEdit(product)}
-                  >
-                    <Edit className="w-4 h-4" />
-                  </Button>
-                  {isAdmin && (
-                    <Button
-                      variant="destructive"
-                      size="icon"
-                      onClick={() => handleDelete(product.id)}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
-                  )}
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
+      <div className="border rounded-lg w-full">
+         <div className="relative w-full overflow-auto">
+            <table className="w-full caption-bottom text-sm">
+                <thead className="[&_tr]:border-b">
+                    <tr className="border-b"><th className="h-12 px-4 text-left">Nome</th><th className="h-12 px-4 text-left">Preço</th><th className="h-12 px-4 text-left">Status</th><th className="h-12 px-4 text-right">Ações</th></tr>
+                </thead>
+                <tbody>
+                    {products.map(product => (
+                        <tr key={product.id} className="border-b">
+                            <td className="p-4 font-medium">{product.name}</td>
+                            {/* Exibe o preço formatado com vírgula */}
+                            <td className="p-4">R$ {product.price.toFixed(2).replace('.', ',' )}</td>
+                            <td className="p-4"><span className={`px-2 py-1 text-xs rounded-full ${product.active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>{product.active ? 'Ativo' : 'Inativo'}</span></td>
+                            <td className="p-4 text-right space-x-2">
+                                <Button variant="outline" size="icon" onClick={() => handleToggleActive(product)}>{product.active ? <XSquare className="h-4 w-4"/> : <CheckSquare className="h-4 w-4"/>}</Button>
+                                <Button variant="outline" size="icon" onClick={() => handleEdit(product)}><Edit className="h-4 w-4" /></Button>
+                            </td>
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+         </div>
       </div>
     </div>
   );

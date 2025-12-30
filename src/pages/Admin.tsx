@@ -1,219 +1,140 @@
-import { useState, useEffect } from "react";
-import { collection, getDocs, doc, updateDoc } from "firebase/firestore";
-import { db } from "@/lib/firebase";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
-import { toast } from "sonner";
-import { Check, X, Shield } from "lucide-react";
 
-interface UserProfile {
+import { useEffect, useState, useCallback } from "react";
+import { db } from "@/lib/firebase";
+import { collection, getDocs, doc, setDoc, deleteDoc, query } from "firebase/firestore";
+import { useAuth } from "@/hooks/useAuth";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { toast } from "sonner";
+import { Loader2, ShieldCheck, Trash2 } from "lucide-react";
+
+interface AdminUser {
   id: string;
   email: string;
-  approved: boolean;
-  created_at: string;
-  isAdmin?: boolean;
 }
 
-export default function Admin() {
-  const [users, setUsers] = useState<UserProfile[]>([]);
+const Admin = () => {
+  const { user, loading: authLoading } = useAuth(); // Use auth loading state
+  const [admins, setAdmins] = useState<AdminUser[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [uid, setUid] = useState("");
 
-  useEffect(() => {
-    fetchUsers();
-  }, []);
-
-  const formatTimestamp = (timestamp: any) => {
-    if (timestamp && typeof timestamp.toDate === 'function') {
-      return timestamp.toDate().toISOString();
-    }
-    // Fallback for cases where created_at might not be a Firestore Timestamp
-    return new Date().toISOString(); 
-  };
-
-  const fetchUsers = async () => {
+  const fetchAdmins = useCallback(async () => {
+    if (!user) return;
     setLoading(true);
     try {
-      const profilesCollection = collection(db, "profiles");
-      const profilesSnapshot = await getDocs(profilesCollection);
-      const profiles = profilesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-
-      const rolesCollection = collection(db, "user_roles");
-      const rolesSnapshot = await getDocs(rolesCollection);
-      const adminUserIds = new Set(
-        rolesSnapshot.docs
-          .filter(doc => doc.data().role === 'admin')
-          .map(doc => doc.data().user_id)
-      );
-
-      const usersWithRoles: UserProfile[] = profiles.map(p => ({
-        id: p.id,
-        email: p.email,
-        approved: p.approved,
-        created_at: formatTimestamp(p.created_at),
-        isAdmin: adminUserIds.has(p.id),
-      }));
-
-      usersWithRoles.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-
-      setUsers(usersWithRoles);
+      const adminsQuery = query(collection(db, "admins"));
+      const querySnapshot = await getDocs(adminsQuery);
+      const adminsData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AdminUser));
+      setAdmins(adminsData);
     } catch (error) {
-      console.error("Error fetching users:", error);
-      toast.error("Erro ao carregar usuários");
+      if (import.meta.env.DEV) console.error("Erro ao carregar admins:", error);
+      toast.error("Erro ao carregar administradores.");
     } finally {
       setLoading(false);
     }
-  };
+  }, [user]);
 
-  const handleApprove = async (userId: string) => {
+  useEffect(() => {
+    if (!authLoading) { // Fetch only when auth is ready
+      fetchAdmins();
+    }
+  }, [authLoading, fetchAdmins]);
+
+  const handleAddAdmin = async () => {
+    if (!uid.trim()) {
+      toast.error("UID do usuário não pode ser vazio.");
+      return;
+    }
+    setIsSubmitting(true);
     try {
-      const userDocRef = doc(db, "profiles", userId);
-      await updateDoc(userDocRef, { approved: true });
-      toast.success("Usuário aprovado com sucesso");
-      fetchUsers();
+      // Here you might want to fetch the user's email from your users collection
+      // For simplicity, we are just storing the UID.
+      await setDoc(doc(db, "admins", uid), { added_at: new Date() });
+      toast.success("Administrador adicionado com sucesso!");
+      setUid("");
+      fetchAdmins(); // Refresh the list
     } catch (error) {
-      console.error("Error approving user:", error);
-      toast.error("Erro ao aprovar usuário");
+      if (import.meta.env.DEV) console.error("Erro ao adicionar admin:", error);
+      toast.error("Falha ao adicionar administrador.");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
-  const handleRevoke = async (userId: string) => {
+  const handleRemoveAdmin = async (adminId: string) => {
+    if (adminId === user?.uid) {
+      toast.error("Você não pode remover a si mesmo.");
+      return;
+    }
     try {
-      const userDocRef = doc(db, "profiles", userId);
-      await updateDoc(userDocRef, { approved: false });
-      toast.success("Acesso revogado");
-      fetchUsers();
+      await deleteDoc(doc(db, "admins", adminId));
+      toast.success("Administrador removido com sucesso!");
+      fetchAdmins(); // Refresh the list
     } catch (error) {
-      console.error("Error revoking access:", error);
-      toast.error("Erro ao revogar acesso");
+      if (import.meta.env.DEV) console.error("Erro ao remover admin:", error);
+      toast.error("Falha ao remover administrador.");
     }
   };
 
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString("pt-BR", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  };
-
-  const pendingUsers = users.filter(u => !u.approved);
-  const approvedUsers = users.filter(u => u.approved);
+  if (loading || authLoading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="h-12 w-12 animate-spin text-primary" />
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 max-w-2xl mx-auto">
       <div>
-        <h2 className="text-3xl font-bold tracking-tight">Administração</h2>
-        <p className="text-muted-foreground">Gerencie os usuários do sistema</p>
+        <h2 className="text-3xl font-bold text-foreground">Painel de Administração</h2>
+        <p className="text-muted-foreground">Gerencie os administradores do sistema.</p>
+      </div>
+      
+      <div className="space-y-4">
+        <div className="flex gap-2">
+          <Input
+            type="text"
+            placeholder="UID do Usuário"
+            value={uid}
+            onChange={(e) => setUid(e.target.value)}
+            disabled={isSubmitting}
+          />
+          <Button onClick={handleAddAdmin} disabled={isSubmitting}>
+            {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Adicionar Admin"}
+          </Button>
+        </div>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Badge variant="destructive">{pendingUsers.length}</Badge>
-            Aguardando Aprovação
-          </CardTitle>
-          <CardDescription>
-            Usuários que se cadastraram e aguardam aprovação
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {loading ? (
-            <p className="text-muted-foreground">Carregando...</p>
-          ) : pendingUsers.length === 0 ? (
-            <p className="text-muted-foreground">Nenhum usuário pendente</p>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Email</TableHead>
-                  <TableHead>Data de Cadastro</TableHead>
-                  <TableHead className="text-right">Ações</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {pendingUsers.map((user) => (
-                  <TableRow key={user.id}>
-                    <TableCell>{user.email}</TableCell>
-                    <TableCell>{formatDate(user.created_at)}</TableCell>
-                    <TableCell className="text-right">
-                      <Button
-                        size="sm"
-                        onClick={() => handleApprove(user.id)}
-                        className="gap-1"
-                      >
-                        <Check className="w-4 h-4" />
-                        Aprovar
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Usuários Aprovados</CardTitle>
-          <CardDescription>
-            Usuários com acesso ao sistema
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {loading ? (
-            <p className="text-muted-foreground">Carregando...</p>
-          ) : approvedUsers.length === 0 ? (
-            <p className="text-muted-foreground">Nenhum usuário aprovado</p>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Email</TableHead>
-                  <TableHead>Função</TableHead>
-                  <TableHead>Data de Cadastro</TableHead>
-                  <TableHead className="text-right">Ações</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {approvedUsers.map((user) => (
-                  <TableRow key={user.id}>
-                    <TableCell>{user.email}</TableCell>
-                    <TableCell>
-                      {user.isAdmin ? (
-                        <Badge className="gap-1">
-                          <Shield className="w-3 h-3" />
-                          Admin
-                        </Badge>
-                      ) : (
-                        <Badge variant="secondary">Usuário</Badge>
-                      )}
-                    </TableCell>
-                    <TableCell>{formatDate(user.created_at)}</TableCell>
-                    <TableCell className="text-right">
-                      {!user.isAdmin && (
-                        <Button
-                          size="sm"
-                          variant="destructive"
-                          onClick={() => handleRevoke(user.id)}
-                          className="gap-1"
-                        >
-                          <X className="w-4 h-4" />
-                          Revogar
-                        </Button>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
+      <div className="space-y-3">
+        <h3 className="text-xl font-semibold">Administradores Atuais</h3>
+        {admins.length > 0 ? (
+          admins.map((admin) => (
+            <div key={admin.id} className="flex items-center justify-between p-3 border rounded-lg bg-card">
+              <div className="flex items-center gap-3">
+                 <ShieldCheck className="h-5 w-5 text-primary" />
+                 <span className="font-mono text-sm">{admin.id}</span>
+                 {admin.id === user?.uid && <span className="text-xs text-muted-foreground">(Você)</span>}
+              </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => handleRemoveAdmin(admin.id)}
+                disabled={admin.id === user?.uid}
+                title={admin.id === user?.uid ? "Não é possível remover a si mesmo" : "Remover"}
+              >
+                <Trash2 className="h-4 w-4 text-destructive" />
+              </Button>
+            </div>
+          ))
+        ) : (
+          <p className="text-muted-foreground text-center py-4">Nenhum administrador encontrado.</p>
+        )}
+      </div>
     </div>
   );
-}
+};
+
+export default Admin;

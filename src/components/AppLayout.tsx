@@ -1,104 +1,83 @@
-import { Link, Outlet, useNavigate } from "react-router-dom";
-import { signOut } from "firebase/auth";
+
+import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { Home, ShoppingCart, Users, DollarSign, BarChart, Settings, LogOut, FileText } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { auth } from "@/lib/firebase";
-import { toast } from "react-toastify";
 
-// Ícones
-const HomeIcon = () => <span>🏠</span>;
-const PackageIcon = () => <span>📦</span>;
-const UsersIcon = () => <span>👥</span>;
-const BillingIcon = () => <span>🧾</span>;
-const RocketIcon = () => <span>🚀</span>;
-const DollarSignIcon = () => <span>💲</span>;
-const ShieldCheckIcon = () => <span>🛡️</span>;
-const LogOutIcon = () => <span>🚪</span>;
-
-// Definindo a interface de props para clareza
 interface AppLayoutProps {
   isAdmin: boolean;
 }
 
-export default function AppLayout({ isAdmin }: AppLayoutProps) {
+const AppLayout = ({ isAdmin }: AppLayoutProps) => {
   const navigate = useNavigate();
 
   const handleLogout = async () => {
-    try {
-      await signOut(auth);
-      toast.success("Logout realizado com sucesso!");
-      navigate("/login");
-    } catch (error) {
-      console.error("Erro ao fazer logout:", error);
-      toast.error("Erro ao fazer logout.");
-    }
+    await auth.signOut();
+    navigate('/login');
   };
 
-  const navLinkClasses = "flex items-center gap-3 rounded-lg px-3 py-2 text-base text-sidebar-foreground transition-all hover:text-sidebar-primary";
+  const navLinkClass = (isActive: boolean) =>
+    `flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground transition-all hover:text-primary ${isActive ? 'bg-muted text-primary' : ''}`;
 
   return (
-    <div className="grid min-h-screen w-full lg:grid-cols-[280px_1fr]">
-      <div className="hidden border-r bg-sidebar lg:block">
-        <div className="flex h-full max-h-screen flex-col justify-between">
-          <div>
-            <div className="flex h-[60px] items-center border-b px-6">
-              <Link to="/" className="flex items-center gap-2 font-semibold text-lg">
-                <PackageIcon />
-                <span>YARA108 - Consumo</span>
-              </Link>
-            </div>
-            <div className="flex-1 overflow-auto py-2">
-              <nav className="grid items-start px-4 font-medium">
-                {isAdmin && (
-                  <Link to="/admin" className={navLinkClasses}>
-                    <ShieldCheckIcon />
-                    Admin
-                  </Link>
-                )}
-                <Link to="/dashboard" className={navLinkClasses}>
-                  <HomeIcon />
-                  Dashboard
-                </Link>
-                <Link to="/consumption" className={navLinkClasses}>
-                  <RocketIcon />
-                  Lançamento
-                </Link>
-                <Link to="/payments" className={navLinkClasses}>
-                  <DollarSignIcon />
-                  Pagamentos
-                </Link>
-                <Link to="/products" className={navLinkClasses}>
-                  <PackageIcon />
-                  Produtos
-                </Link>
-                <Link to="/customers" className={navLinkClasses}>
-                  <UsersIcon />
-                  Clientes
-                </Link>
-                <Link to="/billing" className={navLinkClasses}>
-                  <BillingIcon />
-                  Faturamento
-                </Link>
-              </nav>
-            </div>
+    <div className="grid min-h-screen w-full md:grid-cols-[220px_1fr] lg:grid-cols-[280px_1fr]">
+      <div className="hidden border-r bg-muted/40 md:block">
+        <div className="flex h-full max-h-screen flex-col gap-2">
+          <div className="flex h-14 items-center border-b px-4 lg:h-[60px] lg:px-6">
+            <NavLink to="/" className="flex items-center gap-2 font-semibold">
+              <FileText className="h-6 w-6" />
+              <span>Controle Clientes</span>
+            </NavLink>
           </div>
-          <div className="mb-4 px-4">
-            <button
-              onClick={handleLogout}
-              className={`${navLinkClasses} w-full`}
-            >
-              <LogOutIcon />
-              Logout
-            </button>
+          <div className="flex-1">
+            <nav className="grid items-start px-2 text-sm font-medium lg:px-4">
+              <NavLink to="/dashboard" className={({ isActive }) => navLinkClass(isActive)}>
+                <Home className="h-4 w-4" />
+                Dashboard
+              </NavLink>
+              <NavLink to="/consumption" className={({ isActive }) => navLinkClass(isActive)}>
+                <ShoppingCart className="h-4 w-4" />
+                Consumo
+              </NavLink>
+               <NavLink to="/billing" className={({ isActive }) => navLinkClass(isActive)}>
+                <DollarSign className="h-4 w-4" />
+                Faturamento
+              </NavLink>
+              <NavLink to="/payments" className={({ isActive }) => navLinkClass(isActive)}>
+                <BarChart className="h-4 w-4" />
+                Pagamentos
+              </NavLink>
+              <NavLink to="/products" className={({ isActive }) => navLinkClass(isActive)}>
+                <ShoppingCart className="h-4 w-4" />
+                Produtos
+              </NavLink>
+              <NavLink to="/customers" className={({ isActive }) => navLinkClass(isActive)}>
+                <Users className="h-4 w-4" />
+                Clientes
+              </NavLink>
+              {isAdmin && (
+                <NavLink to="/admin" className={({ isActive }) => navLinkClass(isActive)}>
+                  <Settings className="h-4 w-4" />
+                  Admin
+                </NavLink>
+              )}
+            </nav>
+          </div>
+          <div className="mt-auto p-4">
+             <Button size="sm" variant="outline" onClick={handleLogout} className="w-full justify-start gap-3">
+                <LogOut className="h-4 w-4" />
+                Sair
+            </Button>
           </div>
         </div>
       </div>
-      <div
-        className="flex flex-col bg-cover bg-center"
-        style={{ backgroundImage: "url('/images/background.webp')" }}
-      >
-        <main className="flex flex-1 flex-col gap-4 p-4 md:gap-8 md:p-6 bg-black bg-opacity-50">
+      <div className="flex flex-col">
+        <main className="flex flex-1 flex-col gap-4 p-4 lg:gap-6 lg:p-6">
           <Outlet />
         </main>
       </div>
     </div>
   );
-}
+};
+
+export default AppLayout;

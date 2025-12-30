@@ -1,58 +1,64 @@
-import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
-import { ToastContainer } from "react-toastify";
-import "react-toastify/dist/ReactToastify.css";
+
+import { BrowserRouter as Router, Routes, Route, Outlet } from "react-router-dom";
+import { Toaster } from "@/components/ui/sonner";
 
 import { AuthProvider, useAuth } from "@/hooks/useAuth";
 import ProtectedRoute from "@/components/ProtectedRoute";
+import AdminRoute from "@/components/AdminRoute"; // Import the new AdminRoute
 import AppLayout from "@/components/AppLayout";
 
-// Páginas
-import Login from "@/pages/Auth";
-import Dashboard from "@/pages/Dashboard";
-import Products from "@/pages/Products";
-import Customers from "@/pages/Customers";
-import Billing from "@/pages/Billing";
-import Consumption from "@/pages/Consumption";
-import Payments from "@/pages/Payments";
-import Admin from "@/pages/Admin";
+// Import all pages
+import { 
+  Admin, 
+  Auth as LoginPage, // Renamed to avoid conflict
+  Billing, 
+  Consumption, 
+  Customers, 
+  Dashboard, 
+  NotFound, 
+  Payments, 
+  Products 
+} from "@/pages";
 
-// Componente wrapper para passar isAdmin para o AppLayout
+// Wrapper component to pass isAdmin to AppLayout within the protected context
 const LayoutWrapper = () => {
   const { isAdmin } = useAuth();
-  return <AppLayout isAdmin={isAdmin} />;
+  // Outlet will render the nested child route (e.g., Dashboard, Products, etc.)
+  return (
+    <AppLayout isAdmin={isAdmin}>
+      <Outlet /> 
+    </AppLayout>
+  );
 };
 
 function App() {
   return (
     <AuthProvider>
-      <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-        <ToastContainer autoClose={3000} hideProgressBar />
+      <Router>
+        <Toaster richColors />
         <Routes>
-          {/* Rota pública de login */}
-          <Route path="/login" element={<Login />} />
+          <Route path="/login" element={<LoginPage />} />
 
-          {/* Rota pai protegida que renderiza o AppLayout */}
-          <Route
-            path="/"
-            element={
-              <ProtectedRoute>
-                <LayoutWrapper />
-              </ProtectedRoute>
-            }
-          >
-            {/* Rotas filhas que serão renderizadas dentro do <Outlet /> do AppLayout */}
-            <Route path="dashboard" element={<Dashboard />} />
-            <Route path="consumption" element={<Consumption />} />
-            <Route path="payments" element={<Payments />} />
-            <Route path="products" element={<Products />} />
-            <Route path="customers" element={<Customers />} />
-            <Route path="billing" element={<Billing />} />
-            <Route path="admin" element={<Admin />} />
-
-            {/* Rota de fallback para redirecionar / para /dashboard */}
-            <Route index element={<Dashboard />} />
+          {/* Protected Routes for Authenticated Users */}
+          <Route element={<ProtectedRoute />}>
+            <Route element={<LayoutWrapper />}>
+              <Route index element={<Dashboard />} />
+              <Route path="dashboard" element={<Dashboard />} />
+              <Route path="consumption" element={<Consumption />} />
+              <Route path="billing" element={<Billing />} />
+              <Route path="payments" element={<Payments />} />
+              <Route path="products" element={<Products />} />
+              <Route path="customers" element={<Customers />} />
+              
+              {/* Admin-only Routes */}
+              <Route element={<AdminRoute />}>
+                <Route path="admin" element={<Admin />} />
+              </Route>
+            </Route>
           </Route>
 
+          {/* Fallback 404 Not Found Route */}
+          <Route path="*" element={<NotFound />} />
         </Routes>
       </Router>
     </AuthProvider>
