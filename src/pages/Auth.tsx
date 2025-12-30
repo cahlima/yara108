@@ -3,9 +3,9 @@ import { useNavigate } from "react-router-dom";
 import { z } from "zod";
 import { toast } from "sonner";
 
-import { app, db } from "@/lib/firebase";
+// Importa a instância auth configurada e db
+import { auth, db } from "@/lib/firebase"; 
 import {
-  getAuth,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   sendPasswordResetEmail,
@@ -41,8 +41,7 @@ export default function Auth() {
   const [newPassword, setNewPassword] = useState("");
   const [oobCode, setOobCode] = useState<string | null>(null);
   const navigate = useNavigate();
-  const auth = getAuth(app);
-  const { user, loading } = useAuth();
+  const { user, loading } = useAuth(); // A instância auth já está disponível no hook useAuth
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);

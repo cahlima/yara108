@@ -32,7 +32,6 @@ export default function AppLayout({ isAdmin }: AppLayoutProps) {
     }
   };
 
-  // Aumentando o tamanho da fonte com 'text-base' (equivale a 16px)
   const navLinkClasses = "flex items-center gap-3 rounded-lg px-3 py-2 text-base text-sidebar-foreground transition-all hover:text-sidebar-primary";
 
   return (
@@ -92,9 +91,11 @@ export default function AppLayout({ isAdmin }: AppLayoutProps) {
           </div>
         </div>
       </div>
-      {/* A mudança da imagem de fundo foi revertida para remover a tela branca */}
-      <div className="flex flex-col">
-        <main className="flex flex-1 flex-col gap-4 p-4 md:gap-8 md:p-6">
+      <div
+        className="flex flex-col bg-cover bg-center"
+        style={{ backgroundImage: "url('/images/background.webp')" }}
+      >
+        <main className="flex flex-1 flex-col gap-4 p-4 md:gap-8 md:p-6 bg-black bg-opacity-50">
           <Outlet />
         </main>
       </div>

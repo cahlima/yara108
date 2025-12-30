@@ -1,8 +1,12 @@
-const animate = require("tailwindcss-animate")
-
 /** @type {import('tailwindcss').Config} */
 module.exports = {
   darkMode: ["class"],
+  content: [
+    './pages/**/*.{ts,tsx}',
+    './components/**/*.{ts,tsx}',
+    './app/**/*.{ts,tsx}',
+    './src/**/*.{ts,tsx}',
+  ],
   safelist: [
     "dark",
   ],
@@ -50,27 +54,20 @@ module.exports = {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
-        sidebar: {
-          DEFAULT: '#F8F9FA', // Cor de fundo da sidebar
-          foreground: '#6C757D', // Cor do texto da sidebar
-          primary: '#007BFF', // Cor do item ativo/hover
-          muted: '#E9ECEF', // Cor de fundo do item ativo
-        },
-
       },
       borderRadius: {
-        lg: `var(--radius)`,
-        md: `calc(var(--radius) - 2px)`,
+        lg: "var(--radius)",
+        md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
       },
       keyframes: {
         "accordion-down": {
-          from: { height: 0 },
+          from: { height: "0" },
           to: { height: "var(--radix-accordion-content-height)" },
         },
         "accordion-up": {
           from: { height: "var(--radix-accordion-content-height)" },
-          to: { height: 0 },
+          to: { height: "0" },
         },
       },
       animation: {
@@ -79,5 +76,5 @@ module.exports = {
       },
     },
   },
-  plugins: [animate],
+  plugins: [require("tailwindcss-animate")],
 }

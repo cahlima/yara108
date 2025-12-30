@@ -23,39 +23,28 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    console.log('[Auth] Hook montado, configurando listener...');
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      console.log('[Auth] onAuthStateChanged acionado. Usuário:', currentUser ? currentUser.uid : 'null');
       setUser(currentUser);
       
       if (currentUser) {
         try {
-          console.log('[Auth] Verificando status de admin...');
-          const adminRef = doc(db, 'admins', currentUser.uid);
+          const adminRef = doc(db, "admins", currentUser.uid);
           const adminSnap = await getDoc(adminRef);
-          const isAdminUser = adminSnap.exists();
-          setIsAdmin(isAdminUser);
-          console.log('[Auth] Status de admin verificado:', isAdminUser);
-        } catch (error) {
-          console.error('[Auth] Erro ao verificar status de admin:', error);
+          setIsAdmin(adminSnap.exists());
+        } catch (e) {
+          console.warn("[Auth] Falha ao verificar admin, assumindo false", e);
           setIsAdmin(false);
+        } finally {
+          setLoading(false);
         }
       } else {
         setIsAdmin(false);
-        console.log('[Auth] Usuário nulo, isAdmin definido como false.');
+        setLoading(false);
       }
-      
-      console.log('[Auth] Definindo loading como false.');
-      setLoading(false);
     });
 
-    return () => {
-      console.log('[Auth] Hook desmontado, limpando listener.');
-      unsubscribe();
-    };
+    return () => unsubscribe();
   }, []);
-
-  console.log('[Auth] Renderizando Provider com estado:', { loading, user: user?.uid, isAdmin });
 
   return (
     <AuthContext.Provider value={{ user, isAdmin, loading }}>

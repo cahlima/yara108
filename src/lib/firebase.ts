@@ -3,19 +3,23 @@ import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
 
-// Your web app's Firebase configuration is now loaded from environment variables
+// Your web app's Firebase configuration
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_API_KEY,
-  authDomain: import.meta.env.VITE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_APP_ID
+  apiKey: "AIzaSyCL4vz6kMIX_neZwZ6kSHGdKsVSwzNwDH0",
+  authDomain: "yara108-b7b92.firebaseapp.com",
+  projectId: "yara108-b7b92",
+  storageBucket: "yara108-b7b92.appspot.com",
+  messagingSenderId: "828298841802",
+  appId: "1:828298841802:web:09099f302e8cdc0b006e33"
 };
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
+
+// --- CORRECTED DATABASE INITIALIZATION ---
+// Explicitly connect to the 'a1234yara' database instead of '(default)'
+const db = getFirestore(app, "a1234yara");
+
 const auth = getAuth(app);
 
 export { db, app, auth };
