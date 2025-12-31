@@ -1,7 +1,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { db } from "@/lib/firebase";
-import { collection, addDoc, getDocs, doc, updateDoc, query } from "firebase/firestore";
+import { collection, addDoc, getDocs, doc, updateDoc, query, where } from "firebase/firestore"; // Adicionado 'where'
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
@@ -12,7 +12,6 @@ import { toast } from "sonner";
 import { PlusCircle, Loader2, Edit, CheckSquare, XSquare } from "lucide-react";
 import { z } from "zod";
 
-// Esquema de validação com tratamento para vírgula
 const productSchema = z.object({
   name: z.string().min(3, "Nome deve ter pelo menos 3 caracteres").max(50, "Nome deve ter no máximo 50 caracteres"),
   price: z.string().refine(val => {
@@ -42,7 +41,8 @@ const Products = () => {
     if (!user) return;
     setLoading(true);
     try {
-      const q = query(collection(db, "products"));
+      // CORREÇÃO DE SEGURANÇA: Buscar apenas produtos do usuário logado.
+      const q = query(collection(db, "products"), where("user_id", "==", user.uid));
       const querySnapshot = await getDocs(q);
       const productsData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product));
       setProducts(productsData.sort((a, b) => a.name.localeCompare(b.name)));
@@ -55,10 +55,10 @@ const Products = () => {
   }, [user]);
 
   useEffect(() => {
-    if (!authLoading) {
+    if (!authLoading && user) { // Adicionada verificação de 'user'
       fetchProducts();
     }
-  }, [authLoading, fetchProducts]);
+  }, [authLoading, user, fetchProducts]); // Adicionado 'user' como dependência
 
   const handleDialogChange = (open: boolean) => {
     if (!open) {
@@ -71,7 +71,6 @@ const Products = () => {
 
   const handleEdit = (product: Product) => {
     setEditingProduct(product);
-    // Formata o preço para o padrão brasileiro (com vírgula) ao abrir a edição
     setFormData({ name: product.name, price: product.price.toString().replace('.', ','), active: product.active });
     setIsDialogOpen(true);
   };
@@ -81,7 +80,7 @@ const Products = () => {
       const productRef = doc(db, "products", product.id);
       await updateDoc(productRef, { active: !product.active });
       toast.success(`Produto ${product.name} ${!product.active ? 'ativado' : 'desativado'}`);
-      await fetchProducts();
+      fetchProducts(); // Re-fetch para atualizar a UI
     } catch (error) {
        console.error("Erro ao alterar status:", error);
       toast.error("Erro ao alterar status do produto");
@@ -106,27 +105,32 @@ const Products = () => {
     }
 
     try {
-      // **A CORREÇÃO PRINCIPAL ESTÁ AQUI**
-      // Garante que a vírgula seja trocada por ponto ANTES de salvar
       const priceString = validation.data.price.replace(',', '.');
       const priceNumber = parseFloat(priceString);
 
-      const dataToSave = {
-        name: validation.data.name,
-        price: priceNumber,
-        active: formData.active,
-      };
-
       if (editingProduct) {
+        // Ao editar, não precisamos incluir o user_id, pois ele não muda.
+        const dataToUpdate = {
+          name: validation.data.name,
+          price: priceNumber,
+          active: formData.active,
+        };
         const productRef = doc(db, "products", editingProduct.id);
-        await updateDoc(productRef, dataToSave);
+        await updateDoc(productRef, dataToUpdate);
         toast.success("Produto atualizado com sucesso!");
       } else {
-        await addDoc(collection(db, "products"), dataToSave);
+        // CORREÇÃO CRÍTICA: Incluir user_id ao criar um novo produto.
+        const dataToCreate = {
+          name: validation.data.name,
+          price: priceNumber,
+          active: formData.active, // Garante que o estado de 'active' seja salvo
+          user_id: user.uid, // O CAMPO QUE FALTAVA
+        };
+        await addDoc(collection(db, "products"), dataToCreate);
         toast.success("Produto adicionado com sucesso!");
       }
       
-      await fetchProducts();
+      fetchProducts(); // Re-fetch para atualizar a UI
       handleDialogChange(false);
 
     } catch (error) {
@@ -145,7 +149,6 @@ const Products = () => {
     );
   }
   
-  // O input do preço agora é do tipo "text" para melhor controle da formatação
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -172,8 +175,8 @@ const Products = () => {
                   <Label htmlFor="price">Preço (R$)</Label>
                   <Input
                     id="price"
-                    type="text" // Alterado para text para aceitar vírgula
-                    inputMode="decimal" // Melhora a experiência em mobile
+                    type="text"
+                    inputMode="decimal"
                     placeholder="Ex: 7,50"
                     value={formData.price}
                     onChange={(e) => setFormData({ ...formData, price: e.target.value })}
@@ -200,14 +203,15 @@ const Products = () => {
                     <tr className="border-b"><th className="h-12 px-4 text-left">Nome</th><th className="h-12 px-4 text-left">Preço</th><th className="h-12 px-4 text-left">Status</th><th className="h-12 px-4 text-right">Ações</th></tr>
                 </thead>
                 <tbody>
-                    {products.map(product => (
+                    {products.length === 0 ? (
+                        <tr><td colSpan={4} className="p-4 text-center text-muted-foreground">Nenhum produto cadastrado.</td></tr>
+                    ) : products.map(product => (
                         <tr key={product.id} className="border-b">
                             <td className="p-4 font-medium">{product.name}</td>
-                            {/* Exibe o preço formatado com vírgula */}
-                            <td className="p-4">R$ {product.price.toFixed(2).replace('.', ',' )}</td>
+                            <td className="p-4">R$ {product.price.toFixed(2).replace('.', ',')}</td>
                             <td className="p-4"><span className={`px-2 py-1 text-xs rounded-full ${product.active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>{product.active ? 'Ativo' : 'Inativo'}</span></td>
                             <td className="p-4 text-right space-x-2">
-                                <Button variant="outline" size="icon" onClick={() => handleToggleActive(product)}>{product.active ? <XSquare className="h-4 w-4"/> : <CheckSquare className="h-4 w-4"/>}</Button>
+                                <Button variant="outline" size="icon" onClick={() => handleToggleActive(product)} title={product.active ? 'Desativar' : 'Ativar'}>{product.active ? <XSquare className="h-4 w-4"/> : <CheckSquare className="h-4 w-4"/>}</Button>
                                 <Button variant="outline" size="icon" onClick={() => handleEdit(product)}><Edit className="h-4 w-4" /></Button>
                             </td>
                         </tr>

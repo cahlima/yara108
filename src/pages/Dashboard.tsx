@@ -1,8 +1,8 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { db } from "@/lib/firebase";
-import { collection, getDocs, query, where } from "firebase/firestore";
-import { useAuth } from "@/hooks/useAuth"; // 1. Importar o useAuth
+import { collection, getDocs, query, where, Timestamp } from "firebase/firestore";
+import { useAuth } from "@/hooks/useAuth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,28 +10,35 @@ import { Button } from "@/components/ui/button";
 import { DollarSign, Users, TrendingUp, Search, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
-// Interfaces permanecem as mesmas
 interface Stats {
   totalPending: number;
   totalPaid: number;
   totalCustomers: number;
 }
 
-interface DailyRecord {
-  date: string;
-  customerName: string;
-  total: number;
+interface SaleRecord {
+    id: string;
+    date: Timestamp;
+    customer_id: string;
+    total_price: number;
+    paid?: boolean; // Assumindo que o campo 'paid' pode existir
+}
+
+interface EnrichedSaleRecord {
+    date: string;
+    customerName: string;
+    total: number;
 }
 
 interface DailyGroup {
   date: string;
-  records: DailyRecord[];
+  records: EnrichedSaleRecord[];
   dayTotal: number;
 }
 
 
 const Dashboard = () => {
-  const { loading: authLoading } = useAuth(); // 2. Usar o hook e obter o status de loading da autenticação
+  const { user, loading: authLoading } = useAuth();
   const [stats, setStats] = useState<Stats>({
     totalPending: 0,
     totalPaid: 0,
@@ -44,25 +51,28 @@ const Dashboard = () => {
   const [dailyGroups, setDailyGroups] = useState<DailyGroup[]>([]);
 
   const fetchStats = useCallback(async () => {
+    if (!user) return;
     setLoading(true);
     try {
-      const consumptionRecordsRef = collection(db, "consumption_records");
+      const salesRef = collection(db, "sales");
       const customersRef = collection(db, "customers");
+      
+      const q = query(salesRef, where("user_id", "==", user.uid));
 
-      const [consumptionSnapshot, customersSnapshot] = await Promise.all([
-        getDocs(consumptionRecordsRef),
-        getDocs(customersRef),
+      const [salesSnapshot, customersSnapshot] = await Promise.all([
+        getDocs(q),
+        getDocs(query(customersRef, where("user_id", "==", user.uid))),
       ]);
 
-      const consumptionData = consumptionSnapshot.docs.map((doc) => doc.data());
+      const salesData = salesSnapshot.docs.map((doc) => doc.data());
       
-      const totalPending = consumptionData
+      const totalPending = salesData
         .filter((r) => !r.paid)
-        .reduce((sum, r) => sum + Number(r.total), 0) || 0;
+        .reduce((sum, r) => sum + Number(r.total_price), 0) || 0;
 
-      const totalPaid = consumptionData
+      const totalPaid = salesData
         .filter((r) => r.paid)
-        .reduce((sum, r) => sum + Number(r.total), 0) || 0;
+        .reduce((sum, r) => sum + Number(r.total_price), 0) || 0;
 
       setStats({
         totalPending,
@@ -75,9 +85,8 @@ const Dashboard = () => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [user]);
 
-  // 3. O useEffect agora depende de `authLoading`
   useEffect(() => {
     if (!authLoading) {
       fetchStats();
@@ -85,51 +94,62 @@ const Dashboard = () => {
   }, [authLoading, fetchStats]);
 
   const handleFilter = async () => {
-    if (!startDate || !endDate) {
+    if (!startDate || !endDate || !user) {
       toast.error("Selecione as datas inicial e final");
       return;
     }
 
     setLoading(true);
     try {
-      const consumptionRecordsRef = collection(db, "consumption_records");
+      const start = Timestamp.fromDate(new Date(startDate + "T00:00:00"));
+      const end = Timestamp.fromDate(new Date(endDate + "T23:59:59"));
+
+      const salesRef = collection(db, "sales");
       const q = query(
-        consumptionRecordsRef,
-        where("consumption_date", ">=", startDate),
-        where("consumption_date", "<=", endDate)
+        salesRef,
+        where("user_id", "==", user.uid),
+        where("date", ">=", start),
+        where("date", "<=", end)
       );
       const querySnapshot = await getDocs(q);
-      const consumptionData = querySnapshot.docs.map(doc => doc.data());
+      const salesData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as SaleRecord));
 
-      const customerIds = [...new Set(consumptionData.map(r => r.customer_id).filter(id => id))];
+      const customerIds = [...new Set(salesData.map(r => r.customer_id).filter(id => id))];
       
       const customersMap = new Map<string, string>();
       if (customerIds.length > 0) {
-        // Esta parte pode ser otimizada se houver muitos customerIds
-        // Por enquanto, mantemos a lógica para garantir a correção.
-        const customersSnapshot = await getDocs(collection(db, "customers"));
-        customersSnapshot.forEach(doc => {
-            if(customerIds.includes(doc.id)){
-                 customersMap.set(doc.id, doc.data().name);
-            }
+        // Otimização: Fazer queries em chunks de 30 para o operador 'in'
+        const customerChunks = [];
+        for (let i = 0; i < customerIds.length; i += 30) {
+            customerChunks.push(customerIds.slice(i, i + 30));
+        }
+        
+        const customerPromises = customerChunks.map(chunk => 
+            getDocs(query(collection(db, "customers"), where("__name__", "in", chunk)))
+        );
+
+        const customerSnapshots = await Promise.all(customerPromises);
+        customerSnapshots.forEach(snapshot => {
+            snapshot.forEach(doc => {
+                customersMap.set(doc.id, doc.data().name);
+            });
         });
       }
 
-      // Group by date
-      const groupedByDate: { [key: string]: DailyRecord[] } = {};
+      const groupedByDate: { [key: string]: EnrichedSaleRecord[] } = {};
       
-      consumptionData.forEach(record => {
-        const date = record.consumption_date;
-        if (!groupedByDate[date]) {
-          groupedByDate[date] = [];
+      salesData.forEach(record => {
+        const recordDate = record.date.toDate().toISOString().split('T')[0];
+        if (!groupedByDate[recordDate]) {
+          groupedByDate[recordDate] = [];
         }
         
         const customerName = customersMap.get(record.customer_id) || "Cliente desconhecido";
 
-        groupedByDate[date].push({
-          date,
+        groupedByDate[recordDate].push({
+          date: recordDate,
           customerName,
-          total: Number(record.total),
+          total: Number(record.total_price),
         });
       });
 
@@ -143,7 +163,7 @@ const Dashboard = () => {
       setIsFiltered(true);
     } catch (error) {
       if (import.meta.env.DEV) console.error("Erro ao filtrar:", error);
-      toast.error("Erro ao filtrar dados");
+      toast.error("Erro ao filtrar dados. Verifique os índices do Firestore.");
     } finally {
       setLoading(false);
     }
@@ -154,23 +174,22 @@ const Dashboard = () => {
     setEndDate("");
     setIsFiltered(false);
     setDailyGroups([]);
-    fetchStats(); // Recarrega as estatísticas gerais ao limpar o filtro
+    fetchStats();
   };
   
-    // Funções de formatação (formatDate, formatCurrency) permanecem as mesmas
     const formatDate = (dateString: string) => {
-        const date = new Date(dateString + 'T00:00:00');
+        const date = new Date(dateString + 'T12:00:00'); // Usar um horário neutro para evitar problemas de fuso
         return date.toLocaleDateString("pt-BR", {
-        weekday: 'long',
-        day: '2-digit',
-        month: '2-digit',
+            weekday: 'long',
+            day: '2-digit',
+            month: '2-digit',
         });
     };
     
     const formatCurrency = (value: number) => {
-        return value.toLocaleString("pt-BR", {
-        style: "currency",
-        currency: "BRL",
+        return (value || 0).toLocaleString("pt-BR", {
+            style: "currency",
+            currency: "BRL",
         });
     };
 
@@ -195,7 +214,6 @@ const Dashboard = () => {
     },
   ];
 
-  // 4. Mostrar um loader enquanto a autenticação ou o carregamento inicial estiverem acontecendo.
   if (authLoading || (loading && !isFiltered)) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -208,7 +226,7 @@ const Dashboard = () => {
     <div className="space-y-8">
       <div>
         <h2 className="text-3xl font-bold text-foreground mb-2">Dashboard</h2>
-        <p className="text-muted-foreground">Visão geral do sistema de consumo</p>
+        <p className="text-muted-foreground">Visão geral das suas vendas e clientes.</p>
       </div>
 
       <Card>

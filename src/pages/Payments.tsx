@@ -11,6 +11,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Input } from "@/components/ui/input";
 
+// Estrutura de dados original
 interface ConsumptionRecord {
   id: string;
   customer_id: string;
@@ -29,7 +30,7 @@ interface Customer {
 }
 
 const Payments = () => {
-  const { user, loading: authLoading } = useAuth(); // Use auth loading state
+  const { user, loading: authLoading } = useAuth(); 
   const [records, setRecords] = useState<ConsumptionRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split('T')[0]);
@@ -38,9 +39,8 @@ const Payments = () => {
     if (!user) return;
     setLoading(true);
     try {
-      // 1. Fetch unpaid consumption records for the user
       const recordsQuery = query(
-        collection(db, "consumption_records"),
+        collection(db, "consumption_records"), // Revertido
         where("user_id", "==", user.uid),
         where("paid", "==", false)
       );
@@ -49,22 +49,21 @@ const Payments = () => {
 
       if (recordsData.length === 0) {
         setRecords([]);
+        setLoading(false);
         return;
       }
 
-      // 2. Get unique customer IDs from the records
       const customerIds = [...new Set(recordsData.map(record => record.customer_id))];
       
-      // 3. Fetch customer data for these IDs
-      const customersRef = collection(db, "customers");
-      const customersQuery = query(customersRef, where("__name__", "in", customerIds));
-      const customersSnapshot = await getDocs(customersQuery);
       const customersMap = new Map<string, Customer>();
-      customersSnapshot.docs.forEach(doc => {
-        customersMap.set(doc.id, { id: doc.id, ...doc.data() } as Customer);
-      });
+      if (customerIds.length > 0) {
+        const customersQuery = query(collection(db, "customers"), where("__name__", "in", customerIds));
+        const customersSnapshot = await getDocs(customersQuery);
+        customersSnapshot.docs.forEach(doc => {
+            customersMap.set(doc.id, { id: doc.id, ...doc.data() } as Customer);
+        });
+      }
 
-      // 4. Enrich records with customer data
       const enrichedRecords = recordsData.map(record => ({
         ...record,
         customer_name: customersMap.get(record.customer_id)?.name || "Cliente não encontrado",
@@ -81,7 +80,6 @@ const Payments = () => {
     }
   }, [user]);
 
-  // Effect to fetch records only when authentication is complete and user is available
   useEffect(() => {
     if (!authLoading) {
       fetchRecords();
@@ -90,7 +88,7 @@ const Payments = () => {
 
   const handlePayment = async (recordId: string) => {
     try {
-      const recordRef = doc(db, "consumption_records", recordId);
+      const recordRef = doc(db, "consumption_records", recordId); // Revertido
       await updateDoc(recordRef, { paid: true, payment_date: paymentDate });
       toast.success("Pagamento registrado com sucesso!");
       fetchRecords(); // Refresh
@@ -102,7 +100,7 @@ const Payments = () => {
 
   const handleDelete = async (recordId: string) => {
     try {
-      const recordRef = doc(db, "consumption_records", recordId);
+      const recordRef = doc(db, "consumption_records", recordId); // Revertido
       await deleteDoc(recordRef);
       toast.success("Lançamento excluído com sucesso!");
       fetchRecords(); // Refresh
@@ -112,7 +110,7 @@ const Payments = () => {
     }
   };
 
-  if (loading || authLoading) { // Show loader if either auth or data is loading
+  if (loading || authLoading) {
     return (
       <div className="flex items-center justify-center h-64">
         <Loader2 className="h-12 w-12 animate-spin text-primary" />
@@ -159,7 +157,7 @@ const Payments = () => {
                       Vencimento: {new Date(record.consumption_date.seconds * 1000).toLocaleDateString()}
                     </p>
                     <p className="text-2xl font-extrabold text-primary mt-1">
-                      R$ {record.total.toFixed(2)}
+                      R$ {record.total.toFixed(2)} 
                     </p>
                   </div>
                   <div className="flex items-center gap-2 self-end sm:self-center">
