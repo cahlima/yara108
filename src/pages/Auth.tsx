@@ -33,7 +33,11 @@ const Auth = () => {
     try {
       if (mode === "login") {
         const validatedData = authSchema.parse({ email, password });
-        await signInWithEmailAndPassword(auth, validatedData.email, validatedData.password);
+        const userCredential = await signInWithEmailAndPassword(auth, validatedData.email, validatedData.password);
+        
+        // TEMPORARY LOG
+        console.log("LOGIN SUCCESS - UID:", userCredential.user.uid);
+
         toast.success("Login bem-sucedido!");
         navigate("/");
       } else { // signup
@@ -75,6 +79,9 @@ const Auth = () => {
       if (error instanceof ZodError) {
         toast.error(error.errors[0].message);
       } else if (error instanceof FirebaseError) {
+        // TEMPORARY LOG FOR ALL FIREBASE ERRORS
+        console.error("Firebase Auth Error:", { code: error.code, message: error.message });
+
         switch (error.code) {
           case "auth/user-not-found":
           case "auth/wrong-password":

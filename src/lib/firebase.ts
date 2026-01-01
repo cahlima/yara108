@@ -16,9 +16,8 @@ const firebaseConfig = {
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 
-// --- CORRECTED DATABASE INITIALIZATION ---
-// Explicitly connect to the 'a1234yara' database instead of '(default)'
-const db = getFirestore(app, "a1234yara");
+// Connect to the default Firestore database
+const db = getFirestore(app);
 
 const auth = getAuth(app);
 

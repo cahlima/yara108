@@ -1,7 +1,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { db } from "@/lib/firebase";
-import { collection, addDoc, getDocs, doc, updateDoc, query } from "firebase/firestore";
+import { collection, addDoc, getDocs, doc, updateDoc, query, where, serverTimestamp, FirestoreError } from "firebase/firestore";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
@@ -38,13 +38,14 @@ const Customers = () => {
     if (!user) return;
     setLoading(true);
     try {
-      const q = query(collection(db, "customers"));
+      const q = query(collection(db, "customers"), where("ownerId", "==", user.uid)); // LIST/SEARCH com ownerId
       const querySnapshot = await getDocs(q);
       const customersData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Customer));
       setCustomers(customersData.sort((a, b) => a.name.localeCompare(b.name)));
     } catch (error) {
-      if (import.meta.env.DEV) console.error("Erro ao carregar clientes:", error);
-      toast.error("Erro ao carregar clientes");
+      const err = error as FirestoreError;
+      console.error("Firestore Error:", { code: err.code, message: err.message });
+      toast.error(`Erro ao carregar clientes: ${err.code}`);
     } finally {
       setLoading(false);
     }
@@ -96,10 +97,18 @@ const Customers = () => {
 
       if (editingCustomer) {
         const customerRef = doc(db, "customers", editingCustomer.id);
-        await updateDoc(customerRef, dataToSave);
+        await updateDoc(customerRef, {
+          ...dataToSave,
+          updatedAt: serverTimestamp()
+        }); // UPDATE: ownerId não é enviado, garantindo que não seja alterado
         toast.success("Cliente atualizado com sucesso!");
       } else {
-        await addDoc(collection(db, "customers"), dataToSave);
+        await addDoc(collection(db, "customers"), {
+          ...dataToSave,
+          ownerId: user.uid, // CREATE: ownerId é incluído obrigatoriamente
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        });
         toast.success("Cliente adicionado com sucesso!");
       }
       
@@ -107,8 +116,9 @@ const Customers = () => {
       handleDialogChange(false);
 
     } catch (error) {
-      if (import.meta.env.DEV) console.error("Erro ao salvar cliente:", error);
-      toast.error("Erro ao salvar cliente");
+      const err = error as FirestoreError;
+      console.error("Firestore Error:", { code: err.code, message: err.message });
+      toast.error(`Erro ao salvar cliente: ${err.code}`);
     } finally {
       setIsSubmitting(false);
     }

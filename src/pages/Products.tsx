@@ -1,7 +1,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { db } from "@/lib/firebase";
-import { collection, addDoc, getDocs, doc, updateDoc, query, where } from "firebase/firestore"; // Adicionado 'where'
+import { collection, addDoc, getDocs, doc, updateDoc, query, FirestoreError } from "firebase/firestore";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
@@ -28,7 +28,7 @@ interface Product {
 }
 
 const Products = () => {
-  const { user, loading: authLoading } = useAuth();
+  const { user, isAdmin, loading: authLoading } = useAuth();
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -41,24 +41,28 @@ const Products = () => {
     if (!user) return;
     setLoading(true);
     try {
-      // CORREÇÃO DE SEGURANÇA: Buscar apenas produtos do usuário logado.
-      const q = query(collection(db, "products"), where("user_id", "==", user.uid));
+      // Regra: Qualquer user autenticado pode listar. Admin pode escrever.
+      // A query não precisa de filtro 'where'.
+      const q = query(collection(db, "products"));
       const querySnapshot = await getDocs(q);
       const productsData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product));
       setProducts(productsData.sort((a, b) => a.name.localeCompare(b.name)));
     } catch (error) {
-      console.error("Erro ao carregar produtos:", error);
-      toast.error("Erro ao carregar produtos");
+      const err = error as FirestoreError;
+      console.error("Erro ao carregar produtos:", err);
+      toast.error(`Erro ao carregar produtos: ${err.message}`);
     } finally {
       setLoading(false);
     }
   }, [user]);
 
   useEffect(() => {
-    if (!authLoading && user) { // Adicionada verificação de 'user'
+    // Fetch assim que o status da autenticação for resolvido
+    if (!authLoading) {
       fetchProducts();
     }
-  }, [authLoading, user, fetchProducts]); // Adicionado 'user' como dependência
+  }, [authLoading, fetchProducts]);
+
 
   const handleDialogChange = (open: boolean) => {
     if (!open) {
@@ -75,15 +79,28 @@ const Products = () => {
     setIsDialogOpen(true);
   };
 
+  const handleWriteOperationError = (error: unknown) => {
+    const err = error as FirestoreError;
+    console.error("Erro na operação de escrita:", err);
+    if (err.code === 'permission-denied') {
+      toast.error("Acesso negado. Apenas administradores podem executar esta ação.");
+    } else {
+      toast.error(`Erro ao salvar produto: ${err.message}`);
+    }
+  };
+
   const handleToggleActive = async (product: Product) => {
+    if (!isAdmin) {
+      toast.error("Acesso negado. Apenas administradores podem executar esta ação.");
+      return;
+    }
     try {
       const productRef = doc(db, "products", product.id);
       await updateDoc(productRef, { active: !product.active });
       toast.success(`Produto ${product.name} ${!product.active ? 'ativado' : 'desativado'}`);
       fetchProducts(); // Re-fetch para atualizar a UI
     } catch (error) {
-       console.error("Erro ao alterar status:", error);
-      toast.error("Erro ao alterar status do produto");
+      handleWriteOperationError(error);
     }
   };
 
@@ -109,7 +126,6 @@ const Products = () => {
       const priceNumber = parseFloat(priceString);
 
       if (editingProduct) {
-        // Ao editar, não precisamos incluir o user_id, pois ele não muda.
         const dataToUpdate = {
           name: validation.data.name,
           price: priceNumber,
@@ -119,12 +135,10 @@ const Products = () => {
         await updateDoc(productRef, dataToUpdate);
         toast.success("Produto atualizado com sucesso!");
       } else {
-        // CORREÇÃO CRÍTICA: Incluir user_id ao criar um novo produto.
         const dataToCreate = {
           name: validation.data.name,
           price: priceNumber,
-          active: formData.active, // Garante que o estado de 'active' seja salvo
-          user_id: user.uid, // O CAMPO QUE FALTAVA
+          active: formData.active,
         };
         await addDoc(collection(db, "products"), dataToCreate);
         toast.success("Produto adicionado com sucesso!");
@@ -134,8 +148,7 @@ const Products = () => {
       handleDialogChange(false);
 
     } catch (error) {
-      console.error("Erro ao salvar produto:", error);
-      toast.error("Erro ao salvar produto");
+      handleWriteOperationError(error);
     } finally {
       setIsSubmitting(false);
     }
@@ -156,51 +169,53 @@ const Products = () => {
           <h2 className="text-3xl font-bold text-foreground">Gerenciar Produtos</h2>
           <p className="text-muted-foreground">Adicione, edite e organize seus produtos.</p>
         </div>
-        <Dialog open={isDialogOpen} onOpenChange={handleDialogChange}>
-          <DialogTrigger asChild>
-            <Button><PlusCircle className="w-4 h-4 mr-2" />Novo Produto</Button>
-          </DialogTrigger>
-          <DialogContent className="sm:max-w-[425px]">
-            <DialogHeader>
-              <DialogTitle>{editingProduct ? "Editar Produto" : "Novo Produto"}</DialogTitle>
-            </DialogHeader>
-            <form onSubmit={handleSubmit}>
-              <div className="grid gap-4 py-4">
-                <div className="space-y-2">
-                  <Label htmlFor="name">Nome</Label>
-                  <Input id="name" value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} />
-                  {errors.name && <p className="text-xs text-destructive">{errors.name}</p>}
+        {isAdmin && (
+          <Dialog open={isDialogOpen} onOpenChange={handleDialogChange}>
+            <DialogTrigger asChild>
+              <Button><PlusCircle className="w-4 h-4 mr-2" />Novo Produto</Button>
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-[425px]">
+              <DialogHeader>
+                <DialogTitle>{editingProduct ? "Editar Produto" : "Novo Produto"}</DialogTitle>
+              </DialogHeader>
+              <form onSubmit={handleSubmit}>
+                <div className="grid gap-4 py-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="name">Nome</Label>
+                    <Input id="name" value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} />
+                    {errors.name && <p className="text-xs text-destructive">{errors.name}</p>}
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="price">Preço (R$)</Label>
+                    <Input
+                      id="price"
+                      type="text"
+                      inputMode="decimal"
+                      placeholder="Ex: 7,50"
+                      value={formData.price}
+                      onChange={(e) => setFormData({ ...formData, price: e.target.value })}
+                    />
+                    {errors.price && <p className="text-xs text-destructive">{errors.price}</p>}
+                  </div>
+                   <div className="flex items-center space-x-2">
+                      <Switch id="active-status" checked={formData.active} onCheckedChange={(checked) => setFormData({ ...formData, active: checked })} />
+                      <Label htmlFor="active-status">Ativo</Label>
+                  </div>
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="price">Preço (R$)</Label>
-                  <Input
-                    id="price"
-                    type="text"
-                    inputMode="decimal"
-                    placeholder="Ex: 7,50"
-                    value={formData.price}
-                    onChange={(e) => setFormData({ ...formData, price: e.target.value })}
-                  />
-                  {errors.price && <p className="text-xs text-destructive">{errors.price}</p>}
-                </div>
-                 <div className="flex items-center space-x-2">
-                    <Switch id="active-status" checked={formData.active} onCheckedChange={(checked) => setFormData({ ...formData, active: checked })} />
-                    <Label htmlFor="active-status">Ativo</Label>
-                </div>
-              </div>
-              <DialogFooter>
-                <Button type="submit" disabled={isSubmitting}>{isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Salvar"}</Button>
-              </DialogFooter>
-            </form>
-          </DialogContent>
-        </Dialog>
+                <DialogFooter>
+                  <Button type="submit" disabled={isSubmitting}>{isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Salvar"}</Button>
+                </DialogFooter>
+              </form>
+            </DialogContent>
+          </Dialog>
+        )}
       </div>
 
       <div className="border rounded-lg w-full">
          <div className="relative w-full overflow-auto">
             <table className="w-full caption-bottom text-sm">
                 <thead className="[&_tr]:border-b">
-                    <tr className="border-b"><th className="h-12 px-4 text-left">Nome</th><th className="h-12 px-4 text-left">Preço</th><th className="h-12 px-4 text-left">Status</th><th className="h-12 px-4 text-right">Ações</th></tr>
+                    <tr className="border-b"><th className="h-12 px-4 text-left">Nome</th><th className="h-12 px-4 text-left">Preço</th><th className="h-12 px-4 text-left">Status</th>{isAdmin && <th className="h-12 px-4 text-right">Ações</th>}</tr>
                 </thead>
                 <tbody>
                     {products.length === 0 ? (
@@ -210,10 +225,12 @@ const Products = () => {
                             <td className="p-4 font-medium">{product.name}</td>
                             <td className="p-4">R$ {product.price.toFixed(2).replace('.', ',')}</td>
                             <td className="p-4"><span className={`px-2 py-1 text-xs rounded-full ${product.active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>{product.active ? 'Ativo' : 'Inativo'}</span></td>
-                            <td className="p-4 text-right space-x-2">
-                                <Button variant="outline" size="icon" onClick={() => handleToggleActive(product)} title={product.active ? 'Desativar' : 'Ativar'}>{product.active ? <XSquare className="h-4 w-4"/> : <CheckSquare className="h-4 w-4"/>}</Button>
-                                <Button variant="outline" size="icon" onClick={() => handleEdit(product)}><Edit className="h-4 w-4" /></Button>
-                            </td>
+                            {isAdmin && (
+                              <td className="p-4 text-right space-x-2">
+                                  <Button variant="outline" size="icon" onClick={() => handleToggleActive(product)} title={product.active ? 'Desativar' : 'Ativar'}>{product.active ? <XSquare className="h-4 w-4"/> : <CheckSquare className="h-4 w-4"/>}</Button>
+                                  <Button variant="outline" size="icon" onClick={() => handleEdit(product)}><Edit className="h-4 w-4" /></Button>
+                              </td>
+                            )}
                         </tr>
                     ))}
                 </tbody>

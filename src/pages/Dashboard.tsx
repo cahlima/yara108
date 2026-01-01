@@ -61,7 +61,7 @@ const Dashboard = () => {
 
       const [salesSnapshot, customersSnapshot] = await Promise.all([
         getDocs(q),
-        getDocs(query(customersRef, where("user_id", "==", user.uid))),
+        getDocs(query(customersRef, where("ownerId", "==", user.uid))),
       ]);
 
       const salesData = salesSnapshot.docs.map((doc) => doc.data());
@@ -118,21 +118,17 @@ const Dashboard = () => {
       
       const customersMap = new Map<string, string>();
       if (customerIds.length > 0) {
-        // Otimização: Fazer queries em chunks de 30 para o operador 'in'
-        const customerChunks = [];
-        for (let i = 0; i < customerIds.length; i += 30) {
-            customerChunks.push(customerIds.slice(i, i + 30));
-        }
-        
-        const customerPromises = customerChunks.map(chunk => 
-            getDocs(query(collection(db, "customers"), where("__name__", "in", chunk)))
-        );
+        const customersQuery = query(collection(db, "customers"), where("ownerId", "==", user.uid));
+        const customersSnapshot = await getDocs(customersQuery);
+        const userCustomers = new Map<string, string>();
+        customersSnapshot.forEach(doc => {
+            userCustomers.set(doc.id, doc.data().name);
+        });
 
-        const customerSnapshots = await Promise.all(customerPromises);
-        customerSnapshots.forEach(snapshot => {
-            snapshot.forEach(doc => {
-                customersMap.set(doc.id, doc.data().name);
-            });
+        customerIds.forEach(id => {
+            if (userCustomers.has(id)) {
+                customersMap.set(id, userCustomers.get(id)!);
+            }
         });
       }
 

@@ -1,14 +1,16 @@
 
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { NavLink, useNavigate } from "react-router-dom";
 import { Home, ShoppingCart, Users, DollarSign, BarChart, Settings, LogOut, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { auth } from "@/lib/firebase";
+import React from "react";
 
 interface AppLayoutProps {
   isAdmin: boolean;
+  children: React.ReactNode;
 }
 
-const AppLayout = ({ isAdmin }: AppLayoutProps) => {
+const AppLayout = ({ isAdmin, children }: AppLayoutProps) => {
   const navigate = useNavigate();
 
   const handleLogout = async () => {
@@ -73,7 +75,7 @@ const AppLayout = ({ isAdmin }: AppLayoutProps) => {
       </div>
       <div className="flex flex-col">
         <main className="flex flex-1 flex-col gap-4 p-4 lg:gap-6 lg:p-6">
-          <Outlet />
+          {children}
         </main>
       </div>
     </div>

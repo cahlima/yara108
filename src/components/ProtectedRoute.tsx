@@ -1,27 +1,31 @@
 
-import { Navigate, Outlet } from 'react-router-dom';
-import { useAuth } from '@/hooks/useAuth';
-import { Loader2 } from 'lucide-react';
+import { Navigate, Outlet } from "react-router-dom";
+import { useAuth } from "@/hooks/useAuth"; // Ajuste o caminho se necessário
+import { Loader2 } from "lucide-react";
 
 const ProtectedRoute = () => {
-  const { user, loading } = useAuth();
+  const { user, loading, isApproved } = useAuth();
 
-  // Esta é agora a ÚNICA fonte de verdade para o carregamento inicial.
   if (loading) {
-    // Exibe um loader em tela cheia, assumindo a responsabilidade que era do AuthProvider.
+    // Mostra um spinner enquanto o estado de autenticação e aprovação está sendo verificado
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-background">
-        <Loader2 className="h-12 w-12 animate-spin text-primary" />
+      <div className="flex items-center justify-center h-screen">
+        <Loader2 className="w-12 h-12 animate-spin text-primary" />
       </div>
     );
   }
 
-  // Após o término do carregamento, se não houver usuário, redireciona para a autenticação.
   if (!user) {
+    // Usuário não está logado, redireciona para a página de autenticação.
     return <Navigate to="/auth" replace />;
   }
 
-  // Se o usuário estiver autenticado, renderiza as rotas filhas (o conteúdo da página).
+  if (!isApproved) {
+    // Usuário está logado, mas não aprovado, redireciona para a página de "pendente".
+    return <Navigate to="/pending-approval" replace />;
+  }
+
+  // Se o usuário estiver logado e aprovado, renderiza o conteúdo da rota protegida
   return <Outlet />;
 };
 

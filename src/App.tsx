@@ -1,11 +1,12 @@
 
-import { BrowserRouter as Router, Routes, Route, Outlet } from "react-router-dom";
+import { BrowserRouter as Router, Routes, Route, Outlet, Navigate } from "react-router-dom";
 import { Toaster } from "@/components/ui/sonner";
 
 import { AuthProvider, useAuth } from "@/hooks/useAuth";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import AdminRoute from "@/components/AdminRoute"; // Import the new AdminRoute
 import AppLayout from "@/components/AppLayout";
+import { Loader2 } from "lucide-react";
 
 // Import all pages
 import { 
@@ -17,7 +18,8 @@ import {
   Dashboard, 
   NotFound, 
   Payments, 
-  Products 
+  Products,
+  PendingApproval // Import the new page
 } from "@/pages";
 
 // Wrapper component to pass isAdmin to AppLayout within the protected context
@@ -31,18 +33,42 @@ const LayoutWrapper = () => {
   );
 };
 
+// RootRedirect component to handle initial navigation
+const RootRedirect = () => {
+  const { user, loading, isApproved } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <Loader2 className="w-12 h-12 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <Navigate to="/auth" replace />;
+  }
+
+  if (!isApproved) {
+    return <Navigate to="/pending-approval" replace />;
+  }
+
+  return <Navigate to="/dashboard" replace />;
+};
+
 function App() {
   return (
     <AuthProvider>
       <Router>
         <Toaster richColors />
         <Routes>
-          <Route path="/login" element={<LoginPage />} />
+          <Route path="/auth" element={<LoginPage />} />
+          <Route path="/pending-approval" element={<PendingApproval />} />
+          <Route path="/" element={<RootRedirect />} />
 
           {/* Protected Routes for Authenticated Users */}
           <Route element={<ProtectedRoute />}>
             <Route element={<LayoutWrapper />}>
-              <Route index element={<Dashboard />} />
               <Route path="dashboard" element={<Dashboard />} />
               <Route path="consumption" element={<Consumption />} />
               <Route path="billing" element={<Billing />} />
