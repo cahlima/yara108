@@ -62,6 +62,7 @@ function App() {
       <Router>
         <Toaster richColors />
         <Routes>
+          <Route path="/login" element={<Navigate to="/auth" replace />} />
           <Route path="/auth" element={<LoginPage />} />
           <Route path="/pending-approval" element={<PendingApproval />} />
           <Route path="/" element={<RootRedirect />} />

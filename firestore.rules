@@ -30,14 +30,14 @@ service cloud.firestore {
     }
 
     match /customers/{id} {
-      allow get, list: if isAdmin() || isOwner('ownerId');
+      allow get, list: if isSignedIn();
       allow create: if isAdmin() || isOwnerCreate('ownerId');
       allow update: if (isAdmin() || isOwner('ownerId')) && ownerUnchanged('ownerId');
       allow delete: if isAdmin() || isOwner('ownerId');
     }
 
     match /products/{id} {
-      allow get, list: if isAdmin() || isOwner('ownerId');
+      allow get, list: if isSignedIn();
       allow create: if isAdmin() || isOwnerCreate('ownerId');
       allow update: if (isAdmin() || isOwner('ownerId')) && ownerUnchanged('ownerId');
       allow delete: if isAdmin() || isOwner('ownerId');
@@ -48,7 +48,7 @@ service cloud.firestore {
       allow get: if isAdmin() || idStartsWithUid(invoiceId) || isOwner('ownerId');
 
       // list/query só passa se a query for compatível com ownerId==uid (regras não filtram)
-      allow list: if isAdmin() || isOwner('ownerId');
+      allow list: if isSignedIn();
 
       allow create: if isAdmin() || (idStartsWithUid(invoiceId) && isOwnerCreate('ownerId'));
       allow update: if (isAdmin() || isOwner('ownerId')) && ownerUnchanged('ownerId');
@@ -57,16 +57,22 @@ service cloud.firestore {
 
     match /day_products/{dayProductId} {
       allow get: if isAdmin() || idStartsWithUid(dayProductId) || isOwner('ownerId');
-      allow list: if isAdmin() || isOwner('ownerId');
+      allow list: if isSignedIn();
       allow create: if isAdmin() || (idStartsWithUid(dayProductId) && isOwnerCreate('ownerId'));
       allow update: if (isAdmin() || isOwner('ownerId')) && ownerUnchanged('ownerId');
       allow delete: if isAdmin();
     }
 
     match /consumption_records/{recordId} {
-      allow get, list: if isAdmin() || isOwner('ownerId');
+      allow get, list: if isSignedIn();
       allow create: if isAdmin() || isOwnerCreate('ownerId');
       allow update, delete: if false;
+    }
+
+    match /payments/{paymentId} {
+        allow get, list: if isSignedIn();
+        allow create: if isAdmin() || isOwnerCreate('ownerId');
+        allow update, delete: if false;
     }
   }
 }

@@ -28,7 +28,7 @@ const AppLayout = ({ isAdmin, children }: AppLayoutProps) => {
           <div className="flex h-14 items-center border-b px-4 lg:h-[60px] lg:px-6">
             <NavLink to="/" className="flex items-center gap-2 font-semibold">
               <FileText className="h-6 w-6" />
-              <span>Controle Clientes</span>
+              <span>Sistema de Faturamento Yara 108</span>
             </NavLink>
           </div>
           <div className="flex-1">

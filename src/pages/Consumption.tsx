@@ -13,10 +13,22 @@ import {
   runTransaction,
   getDoc,
   increment,
-  DocumentReference,
+  setDoc,
+  deleteDoc,
 } from "firebase/firestore";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import {
   Dialog,
   DialogContent,
@@ -76,29 +88,22 @@ interface ConsumptionItem {
   quantity: number;
   unit_price: number;
   subtotal: number;
-  payLater: boolean;
 }
 
+// Updated interface to include all relevant fields from the document
 interface ConsumptionRecord {
   id: string;
+  ownerId: string;
+  customer_id: string;
   customer_name: string;
   product_name: string;
   quantity: number;
   subtotal: number;
+  payLater: boolean;
+  invoiceId?: string;
   createdAt: Timestamp;
 }
 
-interface Invoice {
-  ownerId: string;
-  customerId: string;
-  month: string;
-  total: number;
-  paidTotal: number;
-  openTotal: number;
-  status: "OPEN" | "PAID";
-  createdAt: Timestamp;
-  updatedAt?: Timestamp;
-}
 
 const Consumption = () => {
   const { user, loading: authLoading } = useAuth();
@@ -123,6 +128,7 @@ const Consumption = () => {
   const [isRecordsLoading, setIsRecordsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSavingDayProducts, setIsSavingDayProducts] = useState(false);
+  const [isDeleting, setIsDeleting] = useState<string | null>(null); // Track deletion status
 
   // Day products selection
   const [availableProducts, setAvailableProducts] = useState<Product[]>([]);
@@ -228,12 +234,10 @@ const Consumption = () => {
   );
 
   useEffect(() => {
-    // Reset product when customer changes
     setSelectedProduct("");
   }, [selectedCustomer]);
 
   useEffect(() => {
-    // If the selected product is removed from the day's list, reset the selection
     if (selectedProduct && !dayProducts.some((p) => p.id === selectedProduct)) {
       setSelectedProduct("");
     }
@@ -244,17 +248,13 @@ const Consumption = () => {
       toast.error("Selecione cliente e produto.");
       return;
     }
-
     const product = dayProducts.find((p) => p.id === selectedProduct);
     if (!product) {
       toast.error("Produto não encontrado na lista do dia.");
       return;
     }
-
     setItems((prevItems) => {
-      const existingItemIndex = prevItems.findIndex(
-        (item) => item.product_id === selectedProduct
-      );
+      const existingItemIndex = prevItems.findIndex((item) => item.product_id === selectedProduct);
       if (existingItemIndex > -1) {
         const newItems = [...prevItems];
         const item = newItems[existingItemIndex];
@@ -263,23 +263,20 @@ const Consumption = () => {
         return newItems;
       } else {
         return [
-          ...prevItems,
-          {
+          ...prevItems, {
             id: `${selectedProduct}_${Date.now()}`,
             product_id: selectedProduct,
             product_name: product.name,
             quantity,
             unit_price: product.price,
             subtotal: product.price * quantity,
-            payLater,
           },
         ];
       }
     });
-
     setQuantity(1);
     setSelectedProduct("");
-    setProductOpen(false); // Close select after adding
+    setProductOpen(false);
   };
 
   const removeItem = (index: number) => {
@@ -287,88 +284,60 @@ const Consumption = () => {
   };
 
   const saveConsumption = async () => {
-    if (!user || items.length === 0) return;
-    if (!selectedCustomer) {
-      toast.error("Cliente não selecionado.");
+    if (!user || items.length === 0 || !selectedCustomer) {
+      toast.error("Cliente não selecionado ou nenhum item na lista.");
       return;
     }
-
-    // Hardening: Close selects and remove focus before transaction
-    setCustomerOpen(false);
-    setProductOpen(false);
-    (document.activeElement as HTMLElement | null)?.blur();
-
     setIsSubmitting(true);
-    const month = format(consumptionDate, "yyyy-MM");
+    const batch = writeBatch(db);
     const date = format(consumptionDate, "yyyy-MM-dd");
+    const month = format(consumptionDate, "yyyy-MM");
     const customerId = selectedCustomer;
     const ownerId = user.uid;
-    const deterministicInvoiceId = `${ownerId}_${customerId}_${month}`;
-
-    // DEBUGGING LOG
-    console.log("DEBUG: Tentando transação com os seguintes dados:");
-    console.log("-> UID do Usuário Logado (request.auth.uid):", ownerId);
-    console.log("-> ID da Fatura Alvo (invoiceId):", deterministicInvoiceId);
-
+    const customerName = customers.find((c) => c.id === customerId)?.name || "Cliente";
+    let totalToInvoice = 0;
+    let invoiceId: string | undefined = undefined;
+    if (payLater) {
+        invoiceId = `${ownerId}_${customerId}_${month}`;
+        items.forEach(item => { totalToInvoice += item.subtotal; });
+    }
     try {
-      await runTransaction(db, async (transaction) => {
-        const itemsToInvoice = items.filter((item) => item.payLater);
-
-        if (itemsToInvoice.length > 0) {
-          const invoiceRef = doc(db, "invoices", deterministicInvoiceId) as DocumentReference<Invoice>;
-          const invoiceDoc = await transaction.get(invoiceRef);
-          const newInvoiceTotal = itemsToInvoice.reduce((acc, item) => acc + item.subtotal, 0);
-
-          if (!invoiceDoc.exists()) {
-            transaction.set(invoiceRef, {
-              ownerId,
-              customerId,
-              month,
-              total: newInvoiceTotal,
-              paidTotal: 0,
-              openTotal: newInvoiceTotal,
-              status: "OPEN",
-              createdAt: Timestamp.now(),
-            });
-          } else {
-            transaction.update(invoiceRef, {
-              total: increment(newInvoiceTotal),
-              openTotal: increment(newInvoiceTotal),
-              status: "OPEN",
-              updatedAt: Timestamp.now(),
-            });
-          }
-        }
-
-        const customerName = customers.find((c) => c.id === customerId)?.name || "";
         items.forEach((item) => {
-          const recordRef = doc(collection(db, "consumption_records"));
-          transaction.set(recordRef, {
-            ownerId,
-            date,
-            customer_id: customerId,
-            customer_name: customerName,
-            product_id: item.product_id,
-            product_name: item.product_name,
-            quantity: item.quantity,
-            unit_price: item.unit_price,
-            subtotal: item.subtotal,
-            payLater: item.payLater,
-            invoiceId: item.payLater ? deterministicInvoiceId : null,
-            createdAt: Timestamp.now(),
-          });
+            const recordRef = doc(collection(db, "consumption_records"));
+            const record = {
+                ownerId, date, customer_id: customerId, customer_name: customerName,
+                product_id: item.product_id, product_name: item.product_name, quantity: item.quantity,
+                unit_price: item.unit_price, subtotal: item.subtotal, payLater: payLater,
+                createdAt: Timestamp.now(),
+                ...(payLater && invoiceId && { invoiceId: invoiceId }),
+            };
+            batch.set(recordRef, record);
         });
-      });
-
-      toast.success("Consumo salvo com sucesso!");
-      // Hardening: Defer state reset to avoid race conditions
-      setTimeout(() => {
+        if (payLater && invoiceId && totalToInvoice > 0) {
+            const invoiceRef = doc(db, "invoices", invoiceId);
+            await runTransaction(db, async (transaction) => {
+                const invoiceDoc = await transaction.get(invoiceRef);
+                if (!invoiceDoc.exists()) {
+                    transaction.set(invoiceRef, {
+                        ownerId, customerId, month,
+                        total: totalToInvoice, paidTotal: 0, openTotal: totalToInvoice,
+                        status: "OPEN", createdAt: Timestamp.now(),
+                    });
+                } else {
+                    transaction.update(invoiceRef, {
+                        total: increment(totalToInvoice),
+                        openTotal: increment(totalToInvoice),
+                        updatedAt: Timestamp.now(),
+                    });
+                }
+            });
+        }
+        await batch.commit();
+        toast.success("Consumo salvo com sucesso!");
         setItems([]);
         setSelectedCustomer("");
         setSelectedProduct("");
         fetchConsumptionRecords(consumptionDate, user.uid);
-      }, 0);
-
     } catch (e) {
       const err = e as FirestoreError;
       console.error("Erro ao salvar consumo:", err);
@@ -377,12 +346,41 @@ const Consumption = () => {
       setIsSubmitting(false);
     }
   };
+  
+  const handleDeleteRecord = async (record: ConsumptionRecord) => {
+    if (!user) return;
+    setIsDeleting(record.id);
+    try {
+        await runTransaction(db, async (transaction) => {
+            const recordRef = doc(db, "consumption_records", record.id);
+            transaction.delete(recordRef);
+
+            if (record.payLater && record.invoiceId) {
+                const invoiceRef = doc(db, "invoices", record.invoiceId);
+                const invoiceDoc = await transaction.get(invoiceRef);
+                if (invoiceDoc.exists()) {
+                    transaction.update(invoiceRef, {
+                        total: increment(-record.subtotal),
+                        openTotal: increment(-record.subtotal),
+                    });
+                }
+            }
+        });
+        toast.success("Lançamento excluído com sucesso!");
+        fetchConsumptionRecords(consumptionDate, user.uid);
+    } catch (e) {
+        const err = e as FirestoreError;
+        console.error("Erro ao excluir lançamento:", err);
+        toast.error(`Falha ao excluir: ${err.message}`);
+    } finally {
+        setIsDeleting(null);
+    }
+  };
 
   useEffect(() => {
     if (!user || isInitialLoading) return;
     fetchDayProducts(consumptionDate, user.uid);
     fetchConsumptionRecords(consumptionDate, user.uid);
-    // Reset fields when date changes to avoid carrying over state
     setItems([]);
     setSelectedCustomer("");
     setSelectedProduct("");
@@ -414,7 +412,7 @@ const Consumption = () => {
     const dayId = format(consumptionDate, "yyyy-MM-dd");
     const dayProductsRef = doc(db, "day_products", `${user.uid}_${dayId}`);
     try {
-      await writeBatch(db).set(dayProductsRef, { products: dayProducts, ownerId: user.uid }).commit();
+      await setDoc(dayProductsRef, { products: dayProducts, ownerId: user.uid });
       toast.success("Produtos do dia salvos!");
     } catch (e) {
       console.error("Error saving day products: ", e);
@@ -427,11 +425,7 @@ const Consumption = () => {
   const totalConsumption = items.reduce((acc, item) => acc + item.subtotal, 0);
 
   if (authLoading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <Loader2 className="h-12 w-12 animate-spin text-primary" />
-      </div>
-    );
+    return <div className="flex items-center justify-center h-64"><Loader2 className="h-12 w-12 animate-spin text-primary" /></div>;
   }
 
   return (
@@ -439,208 +433,118 @@ const Consumption = () => {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-3xl font-bold text-foreground">Lançar Consumo</h2>
-          <p className="text-muted-foreground">
-            Selecione a data para ver e adicionar consumos.
-          </p>
+          <p className="text-muted-foreground">Selecione a data para ver e adicionar consumos.</p>
         </div>
         <Dialog>
           <DialogTrigger asChild>
-            <Button variant={"outline"}>
-              <CalendarIcon className="mr-2 h-4 w-4" />
-              {format(consumptionDate, "PPP", { locale: ptBR })}
-            </Button>
+            <Button variant={"outline"}><CalendarIcon className="mr-2 h-4 w-4" />{format(consumptionDate, "PPP", { locale: ptBR })}</Button>
           </DialogTrigger>
           <DialogContent className="w-auto p-0">
-            <Calendar
-              mode="single"
-              selected={consumptionDate}
-              onSelect={(date) => date && setConsumptionDate(startOfDay(date))}
-              initialFocus
-            />
+            <Calendar mode="single" selected={consumptionDate} onSelect={(date) => date && setConsumptionDate(startOfDay(date))} initialFocus />
           </DialogContent>
         </Dialog>
       </div>
-
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <Card className="lg:col-span-1">
           <CardHeader>
             <CardTitle>Produtos do Dia</CardTitle>
-            <CardDescription>Itens disponíveis para lançamento.</CardDescription>
+            <CardDescription>Itens disponíveis para o dia selecionado.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex w-full items-center space-x-2">
               <Select value={selectedProductToAdd} onValueChange={setSelectedProductToAdd}>
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Adicionar produto..." />
-                </SelectTrigger>
-                <SelectContent portalled={false}>
-                  {availableProducts.length > 0 ? (
-                    availableProducts.map((p) => (
-                      <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-                    ))
-                  ) : (
-                    <p className="p-4 text-sm text-center text-muted-foreground">
-                      Nenhum produto a adicionar.
-                    </p>
-                  )}
+                <SelectTrigger><SelectValue placeholder="Adicionar produto..." /></SelectTrigger>
+                <SelectContent>
+                  {availableProducts.length > 0 ? ( availableProducts.map((p) => (<SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>))) : (<p className="p-4 text-sm text-center text-muted-foreground">Todos os produtos já foram adicionados.</p>)}
                 </SelectContent>
               </Select>
-              <Button onClick={() => addProductToDay(selectedProductToAdd)} disabled={!selectedProductToAdd}>
-                <PlusCircle className="h-4 w-4" />
-              </Button>
+              <Button onClick={() => addProductToDay(selectedProductToAdd)} disabled={!selectedProductToAdd}><PlusCircle className="h-4 w-4" /></Button>
             </div>
-            {isDayProductsLoading ? (
-              <div className="flex items-center justify-center pt-4">
-                <Loader2 className="h-6 w-6 text-muted-foreground animate-spin" />
-              </div>
-            ) : (
+            {isDayProductsLoading ? (<div className="flex items-center justify-center pt-4"><Loader2 className="h-6 w-6 text-muted-foreground animate-spin" /></div>) : (
               <ul className="space-y-2 pt-4">
-                {dayProducts.map((p) => (
-                  <li key={p.id} className="flex items-center justify-between text-sm p-2 bg-secondary rounded-md">
-                    <span>{p.name}</span>
-                    <Button variant="ghost" size="icon" onClick={() => removeProductFromDay(p.id)}>
-                      <X className="h-4 w-4 text-muted-foreground" />
-                    </Button>
-                  </li>
-                ))}
-                {dayProducts.length === 0 && (
-                  <p className="text-sm text-center text-muted-foreground py-4">Nenhum produto para este dia.</p>
-                )}
-              </ul>
-            )}
+                {dayProducts.map((p) => (<li key={p.id} className="flex items-center justify-between text-sm p-2 bg-secondary rounded-md"><span>{p.name}</span><Button variant="ghost" size="icon" onClick={() => removeProductFromDay(p.id)}><X className="h-4 w-4 text-muted-foreground" /></Button></li>))}
+                {dayProducts.length === 0 && (<p className="text-sm text-center text-muted-foreground py-4">Nenhum produto para este dia.</p>)}
+              </ul>)}
           </CardContent>
-          {dayProducts.length > 0 && (
             <CardFooter>
-              <Button className="w-full" onClick={saveDayProducts} disabled={isSavingDayProducts}>
-                <Save className={cn("w-4 h-4 mr-2", isSavingDayProducts && "hidden")} />
-                <Loader2 className={cn("w-4 h-4 mr-2 animate-spin", !isSavingDayProducts && "hidden")} />
-                Salvar Produtos do Dia
-              </Button>
+              <Button className="w-full" onClick={saveDayProducts} disabled={isSavingDayProducts}><Save className={cn("w-4 h-4 mr-2", isSavingDayProducts && "hidden")} /><Loader2 className={cn("w-4 h-4 mr-2 animate-spin", !isSavingDayProducts && "hidden")} />Salvar Produtos do Dia</Button>
             </CardFooter>
-          )}
         </Card>
 
         <div className="lg:col-span-2 space-y-8">
           <Card>
-            <CardHeader>
-              <CardTitle>Lançar Consumo</CardTitle>
-            </CardHeader>
+            <CardHeader><CardTitle>Novo Lançamento</CardTitle></CardHeader>
             <CardContent className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
                 <div>
                   <Label>Cliente</Label>
-                  <Select
-                    open={customerOpen}
-                    onOpenChange={setCustomerOpen}
-                    value={selectedCustomer}
-                    onValueChange={setSelectedCustomer}
-                    disabled={items.length > 0}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Selecione o cliente..." />
-                    </SelectTrigger>
-                    <SelectContent portalled={false}>
-                      {customers.map((c) => (
-                        <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                      ))}
-                    </SelectContent>
+                  <Select open={customerOpen} onOpenChange={setCustomerOpen} value={selectedCustomer} onValueChange={setSelectedCustomer} disabled={items.length > 0}>
+                    <SelectTrigger><SelectValue placeholder="Selecione o cliente..." /></SelectTrigger>
+                    <SelectContent>{customers.map((c) => (<SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>))}</SelectContent>
                   </Select>
                 </div>
                 <div>
                   <Label>Produto</Label>
-                  <Select
-                    open={productOpen}
-                    onOpenChange={setProductOpen}
-                    value={selectedProduct}
-                    onValueChange={setSelectedProduct}
-                    disabled={!selectedCustomer || isDayProductsLoading}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Selecione o produto..." />
-                    </SelectTrigger>
-                    <SelectContent portalled={false}>
-                      {dayProducts.map((p) => (
-                        <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-                      ))}
-                    </SelectContent>
+                  <Select open={productOpen} onOpenChange={setProductOpen} value={selectedProduct} onValueChange={setSelectedProduct} disabled={!selectedCustomer || isDayProductsLoading || dayProducts.length === 0}>
+                    <SelectTrigger><SelectValue placeholder={dayProducts.length === 0 ? "Adicione produtos do dia" : "Selecione o produto..."} /></SelectTrigger>
+                    <SelectContent>{dayProducts.map((p) => (<SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>))}</SelectContent>
                   </Select>
                 </div>
                 <div>
                   <Label>Quantidade</Label>
-                  <Input
-                    type="number"
-                    value={quantity}
-                    onChange={(e) => setQuantity(Number(e.target.value))}
-                    min={1}
-                    disabled={!selectedCustomer}
-                  />
+                  <Input type="number" value={quantity} onChange={(e) => setQuantity(Number(e.target.value))} min={1} disabled={!selectedCustomer} />
                 </div>
-                <Button onClick={addItem} className="w-full" disabled={!selectedCustomer || !selectedProduct}>
-                  <PlusCircle className="w-4 h-4 mr-2" />
-                  Adicionar Item
-                </Button>
+                <Button onClick={addItem} className="w-full" disabled={!selectedCustomer || !selectedProduct}><PlusCircle className="w-4 h-4 mr-2" />Adicionar Item</Button>
               </div>
             </CardContent>
 
-            {(items.length > 0 || isSubmitting) && (
+            {items.length > 0 && (
               <CardFooter className="flex-col gap-4 items-stretch">
-                <h3 className="text-lg font-semibold">Itens para Salvar</h3>
+                <h3 className="text-lg font-semibold border-t pt-4">Itens para Salvar</h3>
                 <ul className="space-y-2">
-                  {items.map((item, index) => (
-                    <li key={item.id} className="flex items-center justify-between text-sm p-2 bg-secondary rounded-md">
-                      <span>{item.product_name} (x{item.quantity})</span>
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium">R$ {item.subtotal.toFixed(2).replace(".", ",")}</span>
-                        <Button variant="ghost" size="icon" onClick={() => removeItem(index)}>
-                          <Trash2 className="h-4 w-4 text-destructive" />
-                        </Button>
-                      </div>
-                    </li>
-                  ))}
+                  {items.map((item, index) => (<li key={item.id} className="flex items-center justify-between text-sm p-2 bg-secondary rounded-md"><span>{item.product_name} (x{item.quantity})</span><div className="flex items-center gap-2"><span className="font-medium">R$ {item.subtotal.toFixed(2).replace(".", ",")}</span><Button variant="ghost" size="icon" onClick={() => removeItem(index)}><Trash2 className="h-4 w-4 text-destructive" /></Button></div></li>))}
                 </ul>
-                <div className="flex justify-between items-center font-bold text-lg pt-2 border-t">
-                  <span>Total</span>
-                  <span>R$ {totalConsumption.toFixed(2).replace(".", ",")}</span>
-                </div>
-                <div className="flex items-center justify-between w-full pt-2">
-                  <Label htmlFor="pay-later" className="text-sm font-medium">
-                    Pagar depois (gera fatura)
-                  </Label>
+                <div className="flex justify-between items-center font-bold text-lg pt-2 border-t"><span>Total</span><span>R$ {totalConsumption.toFixed(2).replace(".", ",")}</span></div>
+                <div className="flex items-center justify-between w-full pt-4 border-t">
+                  <Label htmlFor="pay-later" className="text-sm font-medium flex flex-col gap-1"> Pagar depois? <span className="text-xs text-muted-foreground">Isso irá gerar ou atualizar uma fatura para o cliente.</span></Label>
                   <Switch id="pay-later" checked={payLater} onCheckedChange={setPayLater} />
                 </div>
-                <Button onClick={saveConsumption} className="w-full" disabled={isSubmitting}>
-                  <Save className={cn("w-4 h-4 mr-2", isSubmitting && "hidden")} />
-                  <Loader2 className={cn("w-4 h-4 mr-2 animate-spin", !isSubmitting && "hidden")} />
-                  Salvar Lançamentos
-                </Button>
-              </CardFooter>
-            )}
+                <Button onClick={saveConsumption} className="w-full" disabled={isSubmitting}><Save className={cn("w-4 h-4 mr-2", isSubmitting && "hidden")} /><Loader2 className={cn("w-4 h-4 mr-2 animate-spin", !isSubmitting && "hidden")} />Salvar Lançamentos</Button>
+              </CardFooter>)}
           </Card>
 
           <Card>
-            <CardHeader>
-              <CardTitle>Lançamentos do Dia (Salvos)</CardTitle>
-            </CardHeader>
+            <CardHeader><CardTitle>Lançamentos Salvos do Dia</CardTitle></CardHeader>
             <CardContent>
-              {isRecordsLoading ? (
-                <div className="flex items-center justify-center pt-4">
-                  <Loader2 className="h-6 w-6 text-muted-foreground animate-spin" />
-                </div>
-              ) : (
+              {isRecordsLoading ? (<div className="flex items-center justify-center pt-4"><Loader2 className="h-6 w-6 text-muted-foreground animate-spin" /></div>) : (
                 <ul className="space-y-2">
                   {savedRecords.map((record) => (
                     <li key={record.id} className="flex justify-between items-center text-sm p-2 border rounded-md">
                       <span>{record.customer_name}: {record.product_name} (x{record.quantity})</span>
-                      <span className="font-medium">R$ {record.subtotal.toFixed(2).replace(".", ",")}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium">R$ {record.subtotal.toFixed(2).replace(".", ",")}</span>
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild><Button variant="ghost" size="icon" disabled={isDeleting === record.id}>{isDeleting === record.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4 text-destructive" />}</Button></AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>Confirmar Exclusão</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                Tem certeza que deseja excluir este lançamento?
+                                {record.payLater && " O valor será abatido da fatura correspondente."}
+                                Essa ação não pode ser desfeita.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                              <AlertDialogAction onClick={() => handleDeleteRecord(record)}>Confirmar</AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                      </div>
                     </li>
                   ))}
-                  {savedRecords.length === 0 && (
-                    <p className="text-sm text-center text-muted-foreground py-4">
-                      Nenhum consumo salvo para este dia.
-                    </p>
-                  )}
-                </ul>
-              )}
+                  {savedRecords.length === 0 && (<p className="text-sm text-center text-muted-foreground py-4">Nenhum consumo salvo para este dia.</p>)}
+                </ul>)}
             </CardContent>
           </Card>
         </div>
