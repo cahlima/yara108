@@ -1,161 +1,149 @@
-/**
- * scripts/reset-and-seed.cjs
- *
- * Uso:
- *  SEED_USER_ID="SEU_UID" node scripts/reset-and-seed.cjs
- *  FIRESTORE_DATABASE_ID="(default)" SEED_USER_ID="SEU_UID" node scripts/reset-and-seed.cjs
- *
- * Requisitos:
- *  - firebase-admin instalado (npm i firebase-admin)
- *  - Credencial Admin SDK via ADC:
- *      export GOOGLE_APPLICATION_CREDENTIALS="/path/serviceAccountKey.json"
- *    ou ambiente já autenticado (Cloud / Workstations)
- */
+/* eslint-disable @typescript-eslint/no-var-requires */
+const admin = require("firebase-admin");
+const { getFirestore } = require("firebase-admin/firestore");
 
-const { initializeApp, applicationDefault } = require("firebase-admin/app");
-const { getFirestore, Timestamp } = require("firebase-admin/firestore");
+// --- CONFIGURAÇÃO ---
+// ATENÇÃO: COLOQUE AQUI O SEU SERVICE ACCOUNT KEY
+const serviceAccount = require("../serviceAccountKey.json");
 
-const databaseId = process.env.FIRESTORE_DATABASE_ID || "(default)";
-const seedUserId = process.env.SEED_USER_ID;
+// ATENÇÃO: DEFINA O UID DO SEU USUÁRIO DE TESTE
+// Este UID será usado para definir o `ownerId` dos dados de teste.
+const SEED_USER_ID = "XZfJtDAalldUWLHy5DF5tuWqSur1";
 
-if (!seedUserId) {
-  console.error(
-    '❌ SEED_USER_ID não informado. Ex: SEED_USER_ID="abc" node scripts/reset-and-seed.cjs'
-  );
-  process.exit(1);
-}
+// --- INICIALIZAÇÃO DO FIREBASE ADMIN ---
 
-const app = initializeApp({ credential: applicationDefault() });
-const db = getFirestore(app, databaseId);
-
-function isoToday() {
-  return new Date().toISOString().slice(0, 10); // YYYY-MM-DD
-}
-
-async function deleteByUserId(collectionName) {
-  const col = db.collection(collectionName);
-  let total = 0;
-
-  while (true) {
-    const snap = await col.where("user_id", "==", seedUserId).limit(400).get();
-    if (snap.empty) break;
-
-    const batch = db.batch();
-    snap.docs.forEach((d) => batch.delete(d.ref));
-    await batch.commit();
-
-    total += snap.size;
-    if (snap.size < 400) break;
-  }
-
-  return total;
-}
-
-async function seed() {
-  const today = isoToday();
-
-  // 1) Customer
-  const customerRef = await db.collection("customers").add({
-    user_id: seedUserId,
-    name: "Cliente Seed",
-    phone: "41999999999",
-    created_at: Timestamp.now(),
-    _seed: true,
+try {
+  admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount),
   });
-
-  // 2) Products
-  const productARef = await db.collection("products").add({
-    user_id: seedUserId,
-    name: "Produto Seed A",
-    price: 5.0,
-    active: true,
-    created_at: Timestamp.now(),
-    _seed: true,
-  });
-
-  const productBRef = await db.collection("products").add({
-    user_id: seedUserId,
-    name: "Produto Seed B",
-    price: 7.5,
-    active: true,
-    created_at: Timestamp.now(),
-    _seed: true,
-  });
-
-  // 3) Day products (date string)
-  await db.collection("day_products").add({
-    user_id: seedUserId,
-    date: today,
-    product_id: productARef.id,
-    custom_price: 5.0,
-    created_at: Timestamp.now(),
-    _seed: true,
-  });
-
-  await db.collection("day_products").add({
-    user_id: seedUserId,
-    date: today,
-    product_id: productBRef.id,
-    custom_price: 7.5,
-    created_at: Timestamp.now(),
-    _seed: true,
-  });
-
-  // 4) Sales (paid=false para aparecer em Payments)
-  const saleDate = Timestamp.fromDate(new Date(`${today}T12:00:00`));
-
-  await db.collection("sales").add({
-    user_id: seedUserId,
-    customer_id: customerRef.id,
-    product_id: productARef.id,
-    quantity: 2,
-    unit_price: 5.0,
-    total_price: 10.0,
-    date: saleDate,
-    paid: false,
-    payment_date: null,
-    created_at: Timestamp.now(),
-    _seed: true,
-  });
-
-  console.log("✅ Seed criado:");
-  console.log("   customers:", customerRef.id);
-  console.log("   products:", productARef.id, productBRef.id);
-  console.log("   day_products: 2 docs");
-  console.log("   sales: 1 doc (paid=false)");
-}
-
-(async () => {
-  try {
-    console.log("✅ Database:", databaseId);
-    console.log("✅ SEED_USER_ID:", seedUserId);
-
-    // Ping
-    await db.collection("_debug").doc("seed_ping").set({
-      ok: true,
-      at: Timestamp.now(),
-      databaseId,
-      user_id: seedUserId,
-    });
-
-    // RESET (somente docs do user_id)
-    const deleted = {
-      sales: await deleteByUserId("sales"),
-      day_products: await deleteByUserId("day_products"),
-      products: await deleteByUserId("products"),
-      customers: await deleteByUserId("customers"),
-      bills: await deleteByUserId("bills"),
-    };
-
-    console.log("🧹 Reset concluído (apagou do user_id):", deleted);
-
-    // SEED
-    await seed();
-
-    console.log("🎉 Reset + Seed concluídos.");
-    process.exit(0);
-  } catch (err) {
-    console.error("❌ Erro no reset/seed:", err);
+  console.log("Firebase Admin SDK inicializado com sucesso.");
+} catch (error) {
+  if (error.code === 'app/duplicate-app') {
+    console.log("Firebase Admin SDK já inicializado.");
+  } else {
+    console.error("Erro ao inicializar Firebase Admin SDK:", error);
     process.exit(1);
   }
-})();
+}
+
+const db = getFirestore();
+
+// --- DADOS PARA SEED ---
+
+const customers = [
+  { name: "Tony Stark" },
+  { name: "Steve Rogers" },
+  { name: "Thor Odinson" },
+  { name: "Bruce Banner" },
+  { name: "Natasha Romanoff" },
+];
+
+const products = [
+  { name: "Pão Francês", price: 0.50, active: true },
+  { name: "Café Expresso", price: 2.50, active: true },
+  { name: "Coca-Cola Lata", price: 4.00, active: true },
+  { name: "Salgado (Coxinha)", price: 5.00, active: true },
+  { name: "Bolo de Chocolate (fatia)", price: 7.00, active: true },
+  { name: "Produto Inativo", price: 10.00, active: false },
+];
+
+// --- FUNÇÕES DE APOIO ---
+
+/**
+ * Apaga todos os documentos de uma coleção que pertencem a um `ownerId`.
+ */
+async function deleteByOwnerId(collectionName, ownerId) {
+  console.log(`Limpando coleção "${collectionName}" para o ownerId: ${ownerId}...`);
+  const querySnapshot = await db.collection(collectionName).where("ownerId", "==", ownerId).get();
+  if (querySnapshot.empty) {
+    console.log(` -> Nenhum documento encontrado em "${collectionName}" para este owner.`);
+    return;
+  }
+  const batch = db.batch();
+  querySnapshot.docs.forEach(doc => {
+    batch.delete(doc.ref);
+  });
+  await batch.commit();
+  console.log(` -> ${querySnapshot.size} documentos apagados de "${collectionName}".`);
+}
+
+/**
+ * Apaga todos os documentos de uma coleção, independentemente do dono.
+ * Usado para coleções globais como 'products'.
+ */
+async function deleteAllFromCollection(collectionName) {
+  console.log(`Limpando TODA a coleção "${collectionName}"...`);
+  const querySnapshot = await db.collection(collectionName).limit(500).get(); // Limite para segurança
+  if (querySnapshot.empty) {
+    console.log(` -> Nenhum documento encontrado em "${collectionName}".`);
+    return;
+  }
+  const batch = db.batch();
+  querySnapshot.docs.forEach(doc => {
+    batch.delete(doc.ref);
+  });
+  await batch.commit();
+  console.log(` -> ${querySnapshot.size} documentos apagados de "${collectionName}".`);
+}
+
+
+/**
+ * Popula uma coleção com dados, adicionando um `ownerId` se aplicável.
+ */
+async function seed(collectionName, data, ownerId) {
+  console.log(`Populando coleção "${collectionName}"...`);
+  const batch = db.batch();
+  data.forEach(item => {
+    const docRef = db.collection(collectionName).doc();
+    
+    // Adiciona ownerId apenas para coleções que não sejam 'products'
+    const dataWithOwner = collectionName !== 'products' 
+      ? { ...item, ownerId } 
+      : item;
+
+    batch.set(docRef, dataWithOwner);
+  });
+  await batch.commit();
+  console.log(` -> ${data.length} documentos criados em "${collectionName}".`);
+}
+
+
+// --- FUNÇÃO PRINCIPAL ---
+
+async function main() {
+  console.log("--- INICIANDO PROCESSO DE RESET E SEED ---");
+
+  if (!SEED_USER_ID) {
+    console.error("❌ Erro: A variável 'SEED_USER_ID' não está definida no script.");
+    console.error("Ação: Defina o UID do seu usuário de teste para continuar.");
+    return;
+  }
+
+  try {
+    // --- Limpeza ---
+    await deleteByOwnerId("customers", SEED_USER_ID);
+    await deleteByOwnerId("consumption_records", SEED_USER_ID);
+    await deleteByOwnerId("invoices", SEED_USER_ID);
+    
+    // Usar a função de limpeza global para coleções não pertencentes a usuários
+    await deleteAllFromCollection("products");
+    await deleteAllFromCollection("day_products");
+
+    // --- Seed ---
+    await seed("customers", customers, SEED_USER_ID);
+    await seed("products", products, null); // ownerId é null para produtos
+
+    console.log("\n✅ Processo concluído com sucesso!");
+
+  } catch (error) {
+    console.error("\n❌ Ocorreu um erro durante o processo:", error);
+  } finally {
+    // Encerra a aplicação do admin para o script finalizar corretamente.
+    console.log('\nEncerrando conexão com o Admin SDK...');
+    await admin.app().delete();
+    console.log('Conexão encerrada.');
+  }
+}
+
+// Executa a função principal
+main();

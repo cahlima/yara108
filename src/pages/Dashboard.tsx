@@ -54,10 +54,10 @@ const Dashboard = () => {
     if (!user) return;
     setLoading(true);
     try {
-      const salesRef = collection(db, "sales");
+      const salesRef = collection(db, "consumption_records"); // CORREÇÃO: Coleção correta
       const customersRef = collection(db, "customers");
       
-      const q = query(salesRef, where("user_id", "==", user.uid));
+      const q = query(salesRef, where("ownerId", "==", user.uid)); // CORREÇÃO: Campo ownerId
 
       const [salesSnapshot, customersSnapshot] = await Promise.all([
         getDocs(q),
@@ -67,12 +67,12 @@ const Dashboard = () => {
       const salesData = salesSnapshot.docs.map((doc) => doc.data());
       
       const totalPending = salesData
-        .filter((r) => !r.paid)
-        .reduce((sum, r) => sum + Number(r.total_price), 0) || 0;
+        .filter((r) => r.payLater) // CORREÇÃO: Usar payLater
+        .reduce((sum, r) => sum + Number(r.subtotal), 0) || 0;
 
       const totalPaid = salesData
-        .filter((r) => r.paid)
-        .reduce((sum, r) => sum + Number(r.total_price), 0) || 0;
+        .filter((r) => !r.payLater)
+        .reduce((sum, r) => sum + Number(r.subtotal), 0) || 0;
 
       setStats({
         totalPending,
@@ -101,41 +101,35 @@ const Dashboard = () => {
 
     setLoading(true);
     try {
-      const start = Timestamp.fromDate(new Date(startDate + "T00:00:00"));
-      const end = Timestamp.fromDate(new Date(endDate + "T23:59:59"));
+      // As datas do formulário vêm como yyyy-MM-dd
+      const start = startDate;
+      const end = endDate;
 
-      const salesRef = collection(db, "sales");
+      const salesRef = collection(db, "consumption_records"); // CORREÇÃO: Coleção correta
       const q = query(
         salesRef,
-        where("user_id", "==", user.uid),
+        where("ownerId", "==", user.uid),
         where("date", ">=", start),
         where("date", "<=", end)
       );
       const querySnapshot = await getDocs(q);
-      const salesData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as SaleRecord));
+      const salesData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any)); // Usar 'any' para simplificar a transformação
 
-      const customerIds = [...new Set(salesData.map(r => r.customer_id).filter(id => id))];
+      const customerIds = [...new Set(salesData.map(r => r.customer_id).filter(Boolean))];
       
       const customersMap = new Map<string, string>();
       if (customerIds.length > 0) {
-        const customersQuery = query(collection(db, "customers"), where("ownerId", "==", user.uid));
+        const customersQuery = query(collection(db, "customers"), where("__name__", "in", customerIds));
         const customersSnapshot = await getDocs(customersQuery);
-        const userCustomers = new Map<string, string>();
         customersSnapshot.forEach(doc => {
-            userCustomers.set(doc.id, doc.data().name);
-        });
-
-        customerIds.forEach(id => {
-            if (userCustomers.has(id)) {
-                customersMap.set(id, userCustomers.get(id)!);
-            }
+            customersMap.set(doc.id, doc.data().name);
         });
       }
 
       const groupedByDate: { [key: string]: EnrichedSaleRecord[] } = {};
       
       salesData.forEach(record => {
-        const recordDate = record.date.toDate().toISOString().split('T')[0];
+        const recordDate = record.date; // O campo 'date' já é yyyy-MM-dd
         if (!groupedByDate[recordDate]) {
           groupedByDate[recordDate] = [];
         }
@@ -145,7 +139,7 @@ const Dashboard = () => {
         groupedByDate[recordDate].push({
           date: recordDate,
           customerName,
-          total: Number(record.total_price),
+          total: Number(record.subtotal),
         });
       });
 

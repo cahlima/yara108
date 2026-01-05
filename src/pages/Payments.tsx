@@ -1,219 +1,233 @@
-
-import { useEffect, useState, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { db } from "@/lib/firebase";
-import { collection, query, where, getDocs, doc, updateDoc, deleteDoc, writeBatch, getDoc } from "firebase/firestore";
+import { collection, query, where, getDocs, doc, runTransaction, Timestamp, FirestoreError } from "firebase/firestore";
 import { useAuth } from "@/hooks/useAuth";
+import { toast } from "sonner";
+import { format } from "date-fns";
+import { Loader2, DollarSign } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { toast } from "sonner";
-import { Loader2, Trash2, CheckCircle, Send, BadgeCent, FileDown } from "lucide-react";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
-// Estrutura de dados original
-interface ConsumptionRecord {
+interface Invoice {
   id: string;
-  customer_id: string;
-  customer_name: string; // Enriched data
-  customer_phone: string | null; // Enriched data
-  total: number;
-  paid: boolean;
-  consumption_date: { seconds: number; nanoseconds: number; };
-  payment_date?: string;
+  month: string;
+  openTotal: number;
+  customerName?: string;
 }
 
 interface Customer {
   id: string;
   name: string;
-  phone: string | null;
 }
 
 const Payments = () => {
-  const { user, loading: authLoading } = useAuth(); 
-  const [records, setRecords] = useState<ConsumptionRecord[]>([]);
+  const { user, authLoading } = useAuth();
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [selectedCustomer, setSelectedCustomer] = useState<string | undefined>();
+  const [selectedInvoice, setSelectedInvoice] = useState<string | undefined>();
+  const [amount, setAmount] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState("PIX");
   const [loading, setLoading] = useState(true);
-  const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split('T')[0]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const fetchRecords = useCallback(async () => {
-    if (!user) return;
-    setLoading(true);
-    try {
-      const recordsQuery = query(
-        collection(db, "consumption_records"), // Revertido
-        where("user_id", "==", user.uid),
-        where("paid", "==", false)
-      );
-      const recordsSnapshot = await getDocs(recordsQuery);
-      const recordsData = recordsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-
-      if (recordsData.length === 0) {
-        setRecords([]);
+  useEffect(() => {
+    const fetchCustomers = async () => {
+      if (!user) return;
+      setLoading(true);
+      try {
+        const q = query(collection(db, "customers"), where("ownerId", "==", user.uid));
+        const snapshot = await getDocs(q);
+        const customersData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Customer));
+        setCustomers(customersData.sort((a,b) => a.name.localeCompare(b.name)));
+      } catch (error) {
+        toast.error("Falha ao carregar clientes.");
+      } finally {
         setLoading(false);
-        return;
       }
+    };
+    if (!authLoading) {
+      fetchCustomers();
+    }
+  }, [user, authLoading]);
 
-      const customerIds = [...new Set(recordsData.map(record => record.customer_id))];
-      
-      const customersMap = new Map<string, Customer>();
-      if (customerIds.length > 0) {
-        const customersQuery = query(collection(db, "customers"), where("__name__", "in", customerIds));
-        const customersSnapshot = await getDocs(customersQuery);
-        customersSnapshot.docs.forEach(doc => {
-            customersMap.set(doc.id, { id: doc.id, ...doc.data() } as Customer);
-        });
+  const fetchInvoicesForCustomer = useCallback(async (customerId: string) => {
+    if (!user) return;
+    try {
+      const q = query(
+        collection(db, "invoices"),
+        where("ownerId", "==", user.uid),
+        where("customerId", "==", customerId),
+        where("status", "in", ["OPEN", "PARTIAL"])
+      );
+      const snapshot = await getDocs(q);
+      const invoicesData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Invoice));
+      setInvoices(invoicesData);
+      if (invoicesData.length > 0) {
+        setSelectedInvoice(invoicesData[0].id);
+        const openTotal = invoicesData[0].openTotal;
+        setAmount(openTotal.toFixed(2).replace('.', ','));
+      } else {
+        toast.info("Este cliente não possui faturas em aberto.");
+        setInvoices([]);
+        setSelectedInvoice(undefined);
+        setAmount("");
       }
-
-      const enrichedRecords = recordsData.map(record => ({
-        ...record,
-        customer_name: customersMap.get(record.customer_id)?.name || "Cliente não encontrado",
-        customer_phone: customersMap.get(record.customer_id)?.phone || null,
-      })) as ConsumptionRecord[];
-
-      setRecords(enrichedRecords);
-
     } catch (error) {
-      if (import.meta.env.DEV) console.error("Erro ao carregar registros:", error);
-      toast.error("Erro ao carregar registros");
-    } finally {
-      setLoading(false);
+        toast.error("Falha ao buscar faturas do cliente.");
     }
   }, [user]);
 
-  useEffect(() => {
-    if (!authLoading) {
-      fetchRecords();
-    }
-  }, [authLoading, fetchRecords]);
+  const handleCustomerChange = (customerId: string) => {
+    setSelectedCustomer(customerId);
+    fetchInvoicesForCustomer(customerId);
+  };
 
-  const handlePayment = async (recordId: string) => {
-    try {
-      const recordRef = doc(db, "consumption_records", recordId); // Revertido
-      await updateDoc(recordRef, { paid: true, payment_date: paymentDate });
-      toast.success("Pagamento registrado com sucesso!");
-      fetchRecords(); // Refresh
-    } catch (error) {
-      if (import.meta.env.DEV) console.error("Erro ao registrar pagamento:", error);
-      toast.error("Erro ao registrar pagamento");
+  const handleInvoiceChange = (invoiceId: string) => {
+    setSelectedInvoice(invoiceId);
+    const invoice = invoices.find(inv => inv.id === invoiceId);
+    if (invoice) {
+        setAmount(invoice.openTotal.toFixed(2).replace('.', ','));
     }
   };
 
-  const handleDelete = async (recordId: string) => {
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user || !selectedInvoice || !selectedCustomer) {
+        toast.error("Selecione o cliente, a fatura e o valor do pagamento.");
+        return;
+    }
+
+    const paymentAmount = parseFloat(amount.replace(",", "."));
+    if (isNaN(paymentAmount) || paymentAmount <= 0) {
+        toast.error("O valor do pagamento é inválido.");
+        return;
+    }
+
+    setIsSubmitting(true);
     try {
-      const recordRef = doc(db, "consumption_records", recordId); // Revertido
-      await deleteDoc(recordRef);
-      toast.success("Lançamento excluído com sucesso!");
-      fetchRecords(); // Refresh
-    } catch (error) {
-      if (import.meta.env.DEV) console.error("Erro ao excluir lançamento:", error);
-      toast.error("Erro ao excluir lançamento");
+        await runTransaction(db, async (transaction) => {
+            const invoiceRef = doc(db, "invoices", selectedInvoice);
+            const invoiceDoc = await transaction.get(invoiceRef);
+            if (!invoiceDoc.exists()) {
+                throw new Error("Fatura não encontrada.");
+            }
+
+            const invoiceData = invoiceDoc.data();
+            const newPaidTotal = invoiceData.paidTotal + paymentAmount;
+            const newOpenTotal = invoiceData.openTotal - paymentAmount;
+            
+            let newStatus = invoiceData.status;
+            if (newOpenTotal <= 0) {
+                newStatus = "PAID";
+            } else if (newPaidTotal > 0) {
+                newStatus = "PARTIAL";
+            }
+
+            // 1. Update invoice
+            transaction.update(invoiceRef, {
+                paidTotal: newPaidTotal,
+                openTotal: newOpenTotal < 0 ? 0 : newOpenTotal,
+                status: newStatus,
+                updatedAt: Timestamp.now(),
+            });
+
+            // 2. Create payment record
+            const paymentRef = doc(collection(db, "payments"));
+            transaction.set(paymentRef, {
+                ownerId: user.uid,
+                customerId: selectedCustomer,
+                invoiceId: selectedInvoice,
+                amount: paymentAmount,
+                method: paymentMethod,
+                paidAt: format(new Date(), "yyyy-MM-dd"),
+                createdAt: Timestamp.now(),
+            });
+        });
+
+        toast.success("Pagamento registrado com sucesso!");
+        // Reset form
+        setSelectedCustomer(undefined);
+        setInvoices([]);
+        setSelectedInvoice(undefined);
+        setAmount("");
+        setPaymentMethod("PIX");
+
+    } catch (e) {
+        const err = e as FirestoreError;
+        console.error("Erro ao registrar pagamento:", err);
+        toast.error(`Falha ao registrar pagamento: ${err.message}`);
+    } finally {
+        setIsSubmitting(false);
     }
   };
 
-  if (loading || authLoading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <Loader2 className="h-12 w-12 animate-spin text-primary" />
-      </div>
-    );
+  if (authLoading || loading) {
+    return <div className="flex justify-center items-center h-64"><Loader2 className="h-12 w-12 animate-spin text-primary" /></div>;
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h2 className="text-3xl font-bold text-foreground">Pagamentos Pendentes</h2>
-          <p className="text-muted-foreground">Marque os consumos que foram pagos.</p>
+    <div className="space-y-6 max-w-2xl mx-auto">
+        <div className="text-center">
+            <h2 className="text-3xl font-bold text-foreground">Registrar Pagamento</h2>
+            <p className="text-muted-foreground">Dê baixa em faturas em aberto de seus clientes.</p>
         </div>
-        <div className="flex items-center gap-2 mt-4 sm:mt-0">
-            <Input 
-                type="date" 
-                value={paymentDate}
-                onChange={e => setPaymentDate(e.target.value)}
-                className="w-[160px]"
-            />
-        </div>
-      </div>
 
-      {records.length === 0 ? (
-        <Card className="border-dashed">
-            <CardContent className="pt-6">
-                <div className="text-center py-12 text-muted-foreground">
-                <BadgeCent className="w-12 h-12 mx-auto mb-2 opacity-50" />
-                <p className="font-semibold">Tudo em ordem!</p>
-                <p className="text-sm">Nenhum pagamento pendente encontrado.</p>
-                </div>
+        <Card>
+            <CardHeader>
+                <CardTitle>Novo Pagamento</CardTitle>
+            </CardHeader>
+            <CardContent>
+                <form onSubmit={handleSubmit} className="space-y-4">
+                    <div>
+                        <Label>Cliente</Label>
+                        <Select onValueChange={handleCustomerChange} value={selectedCustomer}>
+                            <SelectTrigger><SelectValue placeholder="Selecione o cliente..."/></SelectTrigger>
+                            <SelectContent>
+                                {customers.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                            </SelectContent>
+                        </Select>
+                    </div>
+
+                    {selectedCustomer && invoices.length > 0 && (
+                        <div>
+                            <Label>Fatura em Aberto</Label>
+                             <Select onValueChange={handleInvoiceChange} value={selectedInvoice}>
+                                <SelectTrigger><SelectValue placeholder="Selecione a fatura..."/></SelectTrigger>
+                                <SelectContent>
+                                    {invoices.map(inv => <SelectItem key={inv.id} value={inv.id}>Mês: {inv.month} / Aberto: R$ {inv.openTotal.toFixed(2)}</SelectItem>)}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                    )}
+
+                    <div>
+                        <Label htmlFor="amount">Valor do Pagamento (R$)</Label>
+                        <Input id="amount" value={amount} onChange={e => setAmount(e.target.value)} type="text" inputMode="decimal" placeholder="Ex: 123,45"/>
+                    </div>
+
+                    <div>
+                        <Label>Método de Pagamento</Label>
+                        <Select onValueChange={setPaymentMethod} value={paymentMethod}>
+                            <SelectTrigger><SelectValue/></SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="PIX">PIX</SelectItem>
+                                <SelectItem value="DINHEIRO">Dinheiro</SelectItem>
+                                <SelectItem value="CARTAO">Cartão</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    </div>
+                    
+                    <Button type="submit" className="w-full" disabled={isSubmitting || !selectedInvoice}>
+                        {isSubmitting ? <Loader2 className="h-4 w-4 mr-2 animate-spin"/> : <DollarSign className="h-4 w-4 mr-2"/>}
+                        Registrar Pagamento
+                    </Button>
+                </form>
             </CardContent>
         </Card>
-      ) : (
-        <TooltipProvider>
-          <div className="space-y-3">
-            {records.map((record) => (
-              <Card key={record.id} className="hover:border-primary/60 transition-colors">
-                <CardContent className="p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                  <div className="flex-1">
-                    <p className="font-bold text-lg text-foreground">{record.customer_name}</p>
-                    <p className="text-sm text-muted-foreground">
-                      Vencimento: {new Date(record.consumption_date.seconds * 1000).toLocaleDateString()}
-                    </p>
-                    <p className="text-2xl font-extrabold text-primary mt-1">
-                      R$ {record.total.toFixed(2)} 
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2 self-end sm:self-center">
-                    {record.customer_phone && (
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                           <a href={`https://wa.me/55${record.customer_phone.replace(/\D/g, '')}?text=Ol%C3%A1%2C%20${record.customer_name}!%20Lembrete%20de%20pagamento%20no%20valor%20de%20R%24%20${record.total.toFixed(2)}.`} target="_blank" rel="noopener noreferrer">
-                              <Button variant="outline" size="icon">
-                                <Send className="w-4 h-4" />
-                              </Button>
-                           </a>
-                        </TooltipTrigger>
-                        <TooltipContent><p>Enviar lembrete via WhatsApp</p></TooltipContent>
-                      </Tooltip>
-                    )}
-                    <AlertDialog>
-                      <AlertDialogTrigger asChild>
-                        <Button variant="destructive" size="icon" title="Excluir lançamento">
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
-                      </AlertDialogTrigger>
-                      <AlertDialogContent>
-                        <AlertDialogHeader>
-                          <AlertDialogTitle>Excluir Lançamento?</AlertDialogTitle>
-                          <AlertDialogDescription>
-                            Esta ação não pode ser desfeita. O lançamento de{" "}
-                            <strong>{record.customer_name}</strong> no valor de{" "}
-                            <strong>R$ {record.total.toFixed(2)}</strong> será excluído permanentemente.
-                          </AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <AlertDialogFooter>
-                          <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                          <AlertDialogAction
-                            onClick={() => handleDelete(record.id)}
-                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                          >
-                            Excluir
-                          </AlertDialogAction>
-                        </AlertDialogFooter>
-                      </AlertDialogContent>
-                    </AlertDialog>
-                     <Tooltip>
-                        <TooltipTrigger asChild>
-                            <Button onClick={() => handlePayment(record.id)} size="icon" className="bg-green-600 hover:bg-green-700 w-12 h-12">
-                                <CheckCircle className="w-6 h-6" />
-                            </Button>
-                        </TooltipTrigger>
-                        <TooltipContent><p>Marcar como Pago</p></TooltipContent>
-                      </Tooltip>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </TooltipProvider>
-      )}
     </div>
   );
 };

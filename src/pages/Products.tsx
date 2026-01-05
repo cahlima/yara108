@@ -1,7 +1,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { db } from "@/lib/firebase";
-import { collection, addDoc, getDocs, doc, updateDoc, query, FirestoreError } from "firebase/firestore";
+import { collection, addDoc, getDocs, doc, updateDoc, query, FirestoreError, where } from "firebase/firestore";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
@@ -25,6 +25,7 @@ interface Product {
   name: string;
   price: number;
   active: boolean;
+  ownerId?: string;
 }
 
 const Products = () => {
@@ -38,12 +39,17 @@ const Products = () => {
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const fetchProducts = useCallback(async () => {
-    if (!user) return;
+    if (!user) {
+        setLoading(false);
+        return;
+    }
     setLoading(true);
     try {
-      // Regra: Qualquer user autenticado pode listar. Admin pode escrever.
-      // A query não precisa de filtro 'where'.
-      const q = query(collection(db, "products"));
+      const base = collection(db, "products");
+      const q = isAdmin
+        ? query(base)
+        : query(base, where("active", "==", true));
+
       const querySnapshot = await getDocs(q);
       const productsData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product));
       setProducts(productsData.sort((a, b) => a.name.localeCompare(b.name)));
@@ -51,17 +57,24 @@ const Products = () => {
       const err = error as FirestoreError;
       console.error("Erro ao carregar produtos:", err);
       toast.error(`Erro ao carregar produtos: ${err.message}`);
+      setProducts([]); 
     } finally {
       setLoading(false);
     }
-  }, [user]);
+  }, [user, isAdmin]);
 
   useEffect(() => {
-    // Fetch assim que o status da autenticação for resolvido
-    if (!authLoading) {
-      fetchProducts();
+    if (authLoading) {
+      return; 
     }
-  }, [authLoading, fetchProducts]);
+
+    if (user) {
+      fetchProducts();
+    } else {
+      setLoading(false);
+      setProducts([]);
+    }
+  }, [authLoading, user, fetchProducts]);
 
 
   const handleDialogChange = (open: boolean) => {
@@ -98,7 +111,7 @@ const Products = () => {
       const productRef = doc(db, "products", product.id);
       await updateDoc(productRef, { active: !product.active });
       toast.success(`Produto ${product.name} ${!product.active ? 'ativado' : 'desativado'}`);
-      fetchProducts(); // Re-fetch para atualizar a UI
+      setProducts(prev => prev.map(p => p.id === product.id ? { ...p, active: !p.active } : p));
     } catch (error) {
       handleWriteOperationError(error);
     }
@@ -107,6 +120,13 @@ const Products = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
+    
+    if (!isAdmin) {
+      toast.error("Acesso negado. Apenas administradores podem executar esta ação.");
+      setIsSubmitting(false);
+      return;
+    }
+
     setIsSubmitting(true);
     setErrors({});
 
@@ -139,12 +159,13 @@ const Products = () => {
           name: validation.data.name,
           price: priceNumber,
           active: formData.active,
+          ownerId: user.uid,
         };
         await addDoc(collection(db, "products"), dataToCreate);
         toast.success("Produto adicionado com sucesso!");
       }
       
-      fetchProducts(); // Re-fetch para atualizar a UI
+      fetchProducts();
       handleDialogChange(false);
 
     } catch (error) {
@@ -154,7 +175,7 @@ const Products = () => {
     }
   };
 
-  if (loading || authLoading) {
+  if (loading) { 
     return (
       <div className="flex items-center justify-center h-64">
         <Loader2 className="h-12 w-12 animate-spin text-primary" />
@@ -219,7 +240,14 @@ const Products = () => {
                 </thead>
                 <tbody>
                     {products.length === 0 ? (
-                        <tr><td colSpan={4} className="p-4 text-center text-muted-foreground">Nenhum produto cadastrado.</td></tr>
+                        <tr>
+                          <td
+                            colSpan={isAdmin ? 4 : 3}
+                            className="p-4 text-center text-muted-foreground"
+                          >
+                            Nenhum produto cadastrado.
+                          </td>
+                        </tr>
                     ) : products.map(product => (
                         <tr key={product.id} className="border-b">
                             <td className="p-4 font-medium">{product.name}</td>

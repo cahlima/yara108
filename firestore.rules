@@ -2,152 +2,71 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    /* =========================
-       Helpers
-    ========================= */
-    function isSignedIn() {
-      return request.auth != null;
-    }
+    function isSignedIn() { return request.auth != null; }
+    function isAdmin() { return isSignedIn() && request.auth.token.admin == true; }
 
-    // Admin via custom claim
-    function isAdmin() {
-      return isSignedIn() && request.auth.token.admin == true;
-    }
-
-    // “Self” (document id == uid)
-    function isSelf(docId) {
-      return isSignedIn() && request.auth.uid == docId;
-    }
-
-    // Owner check using a field inside the document
     function isOwner(fieldName) {
       return isSignedIn()
+        && resource != null
         && resource.data[fieldName] == request.auth.uid;
     }
 
-    // Owner check for CREATE (resource doesn't exist yet)
     function isOwnerCreate(fieldName) {
       return isSignedIn()
         && request.resource.data[fieldName] == request.auth.uid;
     }
 
-    /* =========================
-       ADMINS (frontend check only)
-       - Only allows signed-in users to "get" a doc (existence check)
-       - Writes disabled; admin status is via custom claim
-    ========================= */
+    function ownerUnchanged(fieldName) {
+      return request.resource.data[fieldName] == resource.data[fieldName];
+    }
+
+    function idStartsWithUid(docId) {
+      return isSignedIn() && docId.matches('^' + request.auth.uid + '_.*$');
+    }
+
     match /admins/{adminId} {
       allow get: if isSignedIn();
-      allow list: if false;
-      allow create, update, delete: if false;
+      allow list, create, update, delete: if false;
     }
 
-    /* =========================
-       PRODUCTS
-       - Any signed-in user can read/list
-       - Only admin can write
-    ========================= */
-    match /products/{productId} {
-      allow get, list: if isSignedIn();
-      allow create, update, delete: if isAdmin();
+    match /customers/{id} {
+      allow get, list: if isAdmin() || isOwner('ownerId');
+      allow create: if isAdmin() || isOwnerCreate('ownerId');
+      allow update: if (isAdmin() || isOwner('ownerId')) && ownerUnchanged('ownerId');
+      allow delete: if isAdmin() || isOwner('ownerId');
     }
 
-    /* =========================
-       CUSTOMERS (your "clients" entity)
-       Model: flat collection /customers with field ownerId
-       - Owner can get/update/delete
-       - Create requires ownerId == uid
-       - Admin can list/get/update/delete (for management/reporting)
-       
-       IMPORTANT:
-       For non-admin listing, your frontend MUST query with:
-       where("ownerId", "==", request.auth.uid)
-       We enforce this via request.query.where(...) when possible.
-    ========================= */
-    match /customers/{customerId} {
-
-      // Read single doc
-      allow get: if isAdmin() || isOwner("ownerId");
-
-      // Create: must set ownerId == uid
-      allow create: if isOwnerCreate("ownerId");
-
-      // Update:
-      // - Admin can update anything
-      // - Owner can update BUT cannot change ownerId
-      allow update: if isAdmin() || (
-        isOwner("ownerId") &&
-        request.resource.data.ownerId == resource.data.ownerId
-      );
-
-      // Delete:
-      // - Admin or owner
-      allow delete: if isAdmin() || isOwner("ownerId");
-
-      // List / queries:
-      // - Admin can list everything
-      // - Non-admin only if query is constrained to their ownerId
-      //
-      // NOTE: If your rules compiler complains about request.query.where,
-      // use the fallback snippet at the end of this message.
-      allow list: if isAdmin() || (
-        isSignedIn() &&
-        request.query.where("ownerId", "==", request.auth.uid)
-      );
+    match /products/{id} {
+      allow get, list: if isAdmin() || isOwner('ownerId');
+      allow create: if isAdmin() || isOwnerCreate('ownerId');
+      allow update: if (isAdmin() || isOwner('ownerId')) && ownerUnchanged('ownerId');
+      allow delete: if isAdmin() || isOwner('ownerId');
     }
 
-    /* =========================
-       DAY_PRODUCTS
-       (kept as you had: signed-in read/write)
-       If later you want per-user isolation, we can add ownerId rules too.
-    ========================= */
+    match /invoices/{invoiceId} {
+      // transação precisa de get mesmo quando doc não existe
+      allow get: if isAdmin() || idStartsWithUid(invoiceId) || isOwner('ownerId');
+
+      // list/query só passa se a query for compatível com ownerId==uid (regras não filtram)
+      allow list: if isAdmin() || isOwner('ownerId');
+
+      allow create: if isAdmin() || (idStartsWithUid(invoiceId) && isOwnerCreate('ownerId'));
+      allow update: if (isAdmin() || isOwner('ownerId')) && ownerUnchanged('ownerId');
+      allow delete: if isAdmin();
+    }
+
     match /day_products/{dayProductId} {
-      allow get, list: if isSignedIn();
-      allow create, update, delete: if isSignedIn();
+      allow get: if isAdmin() || idStartsWithUid(dayProductId) || isOwner('ownerId');
+      allow list: if isAdmin() || isOwner('ownerId');
+      allow create: if isAdmin() || (idStartsWithUid(dayProductId) && isOwnerCreate('ownerId'));
+      allow update: if (isAdmin() || isOwner('ownerId')) && ownerUnchanged('ownerId');
+      allow delete: if isAdmin();
     }
 
-    /* =========================
-       CONSUMPTION_RECORDS
-       (kept as you had: signed-in read/write)
-    ========================= */
     match /consumption_records/{recordId} {
-      allow get, list: if isSignedIn();
-      allow create, update, delete: if isSignedIn();
-    }
-
-    /* =========================
-       USERS (user profile / approval)
-       - User can get/create own doc
-       - User can update own doc BUT cannot self-approve
-       - Admin can list/get/update any user (to approve)
-    ========================= */
-    match /users/{userId} {
-
-      // Read single user profile
-      allow get: if isAdmin() || isSelf(userId);
-
-      // Create own profile
-      // (optional rule: prevent user from creating already approved)
-      allow create: if isSelf(userId) && (
-        !("approved" in request.resource.data) || request.resource.data.approved == false
-      );
-
-      // Update:
-      // - Admin can update anything (approve users)
-      // - User can update own profile BUT cannot change "approved"
-      allow update: if isAdmin() || (
-        isSelf(userId) &&
-        (
-          !("approved" in request.resource.data) ||
-          request.resource.data.approved == resource.data.approved
-        )
-      );
-
-      // Admin can list users for management UI
-      allow list: if isAdmin();
-
-      // Optional hardening: do not allow delete from client
-      allow delete: if false;
+      allow get, list: if isAdmin() || isOwner('ownerId');
+      allow create: if isAdmin() || isOwnerCreate('ownerId');
+      allow update, delete: if false;
     }
   }
 }
