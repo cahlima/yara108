@@ -1,63 +1,72 @@
+
 rules_version = '2';
+
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    function isSignedIn() { return request.auth != null; }
-    function isAdmin() { return isSignedIn() && request.auth.token.admin == true; }
-
-    function isOwner(fieldName) {
-      return isSignedIn()
-        && resource != null
-        && resource.data[fieldName] == request.auth.uid;
+    // --- HELPER FUNCTIONS ---
+    function isSignedIn() {
+      return request.auth != null;
     }
 
-    function isOwnerCreate(fieldName) {
-      return isSignedIn()
-        && request.resource.data[fieldName] == request.auth.uid;
+    function isOwner(ownerId) {
+      // Check if the requesting user is the owner of the document.
+      return request.auth.uid == resource.data[ownerId];
     }
-
-    function ownerUnchanged(fieldName) {
-      return request.resource.data[fieldName] == resource.data[fieldName];
+    
+    function isOwnerCreate(ownerId) {
+        // Check if the user is creating a document for themselves.
+        return request.auth.uid == request.resource.data[ownerId];
     }
 
     function idStartsWithUid(docId) {
-      return isSignedIn() && docId.matches('^' + request.auth.uid + '_.*$');
+        // Check if a document ID starts with the user's UID.
+        return docId.startsWith(request.auth.uid);
+    }
+    
+    function isAdmin() {
+        // Check if the user has an ADMIN role in their user document.
+        return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'ADMIN';
     }
 
-    match /admins/{adminId} {
+    function ownerUnchanged(ownerId) {
+        // Ensure the ownerId field is not changed during an update.
+        return request.resource.data[ownerId] == resource.data[ownerId];
+    }
+
+    // --- COLLECTIONS ---
+    match /users/{userId} {
       allow get: if isSignedIn();
-      allow list, create, update, delete: if false;
+      allow list: if isAdmin();
+      allow create: if request.resource.data.role == 'USER';
+      allow update: if isAdmin() || (request.auth.uid == userId);
     }
 
-    match /customers/{id} {
-      allow get, list: if isSignedIn();
+    match /customers/{customerId} {
+      allow get: if isAdmin() || isOwner('ownerId');
+      allow list: if isSignedIn();
       allow create: if isAdmin() || isOwnerCreate('ownerId');
       allow update: if (isAdmin() || isOwner('ownerId')) && ownerUnchanged('ownerId');
       allow delete: if isAdmin() || isOwner('ownerId');
     }
 
-    match /products/{id} {
-      allow get, list: if isSignedIn();
+    match /products/{productId} {
+      allow read: if isAdmin() || isOwner('ownerId'); 
       allow create: if isAdmin() || isOwnerCreate('ownerId');
       allow update: if (isAdmin() || isOwner('ownerId')) && ownerUnchanged('ownerId');
       allow delete: if isAdmin() || isOwner('ownerId');
     }
 
     match /invoices/{invoiceId} {
-      // transação precisa de get mesmo quando doc não existe
-      allow get: if isAdmin() || idStartsWithUid(invoiceId) || isOwner('ownerId');
-
-      // list/query só passa se a query for compatível com ownerId==uid (regras não filtram)
+      allow get: if isAdmin() || idStartsWithUid(invoiceId);
       allow list: if isSignedIn();
-
       allow create: if isAdmin() || (idStartsWithUid(invoiceId) && isOwnerCreate('ownerId'));
       allow update: if (isAdmin() || isOwner('ownerId')) && ownerUnchanged('ownerId');
       allow delete: if isAdmin();
     }
 
     match /day_products/{dayProductId} {
-      allow get: if isAdmin() || idStartsWithUid(dayProductId) || isOwner('ownerId');
-      allow list: if isSignedIn();
+      allow read: if isAdmin() || isOwner('ownerId');
       allow create: if isAdmin() || (idStartsWithUid(dayProductId) && isOwnerCreate('ownerId'));
       allow update: if (isAdmin() || isOwner('ownerId')) && ownerUnchanged('ownerId');
       allow delete: if isAdmin();
@@ -66,7 +75,7 @@ service cloud.firestore {
     match /consumption_records/{recordId} {
       allow get, list: if isSignedIn();
       allow create: if isAdmin() || isOwnerCreate('ownerId');
-      allow update, delete: if false;
+      allow update, delete: if isAdmin() || isOwner('ownerId');
     }
 
     match /payments/{paymentId} {

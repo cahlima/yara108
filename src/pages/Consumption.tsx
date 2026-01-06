@@ -353,21 +353,29 @@ const Consumption = () => {
     try {
         await runTransaction(db, async (transaction) => {
             const recordRef = doc(db, "consumption_records", record.id);
-            transaction.delete(recordRef);
-
+            
+            // --- FIX: READ FIRST, THEN WRITE ---
+            let invoiceRef;
+            let invoiceDoc;
             if (record.payLater && record.invoiceId) {
-                const invoiceRef = doc(db, "invoices", record.invoiceId);
-                const invoiceDoc = await transaction.get(invoiceRef);
-                if (invoiceDoc.exists()) {
-                    transaction.update(invoiceRef, {
-                        total: increment(-record.subtotal),
-                        openTotal: increment(-record.subtotal),
-                    });
-                }
+                invoiceRef = doc(db, "invoices", record.invoiceId);
+                invoiceDoc = await transaction.get(invoiceRef); // 1. READ
+            }
+
+            // 2. NOW, WRITE
+            transaction.delete(recordRef); // WRITE 1
+
+            if (invoiceRef && invoiceDoc?.exists()) {
+                transaction.update(invoiceRef, { // WRITE 2
+                    total: increment(-record.subtotal),
+                    openTotal: increment(-record.subtotal),
+                });
             }
         });
+
         toast.success("Lançamento excluído com sucesso!");
         fetchConsumptionRecords(consumptionDate, user.uid);
+
     } catch (e) {
         const err = e as FirestoreError;
         console.error("Erro ao excluir lançamento:", err);

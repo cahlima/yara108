@@ -49,9 +49,7 @@ const Products = () => {
     setLoading(true);
     try {
       const base = collection(db, "products");
-      // Admin can see all products, other users see only their active ones.
-      // Simplified: for this app, we assume only admin manages products.
-      const q = query(base, where("ownerId", "==", user.uid));
+      const q = isAdmin ? base : query(base, where("ownerId", "==", user.uid));
 
       const querySnapshot = await getDocs(q);
       const productsData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product));
@@ -253,7 +251,9 @@ const Products = () => {
                                 <td className="p-4 text-right space-x-2">
                                     <Button variant="outline" size="icon" onClick={() => handleToggleActive(product)} title={product.active ? 'Desativar' : 'Ativar'}>{product.active ? <XSquare className="h-4 w-4"/> : <CheckSquare className="h-4 w-4"/>}</Button>
                                     <Button variant="outline" size="icon" onClick={() => handleEdit(product)}><Edit className="h-4 w-4" /></Button>
-                                    <Button variant="destructive" size="icon" onClick={() => handleDelete(product)}><Trash2 className="h-4 w-4" /></Button>
+                                    <AlertDialogTrigger asChild>
+                                      <Button variant="destructive" size="icon" onClick={() => handleDelete(product)}><Trash2 className="h-4 w-4" /></Button>
+                                    </AlertDialogTrigger>
                                 </td>
                               )}
                           </tr>
