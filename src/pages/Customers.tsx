@@ -70,7 +70,7 @@ const Customers = () => {
     setLoading(true);
     try {
       const customersCollection = collection(db, "customers");
-      const querySnapshot = await getDocs(customersCollection);
+      const querySnapshot = await getDocs(query(customersCollection, where("ownerId", "==", user.uid)));
       const customersData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Customer));
       setCustomers(customersData.sort((a, b) => a.name.localeCompare(b.name)));
     } catch (error) {
@@ -114,17 +114,14 @@ const Customers = () => {
     try {
         const batch = writeBatch(db);
 
-        // 1. Find and delete consumption records
         const consumptionQuery = query(collection(db, "consumption_records"), where("customer_id", "==", customerToDelete.id), where("ownerId", "==", user.uid));
         const consumptionSnapshot = await getDocs(consumptionQuery);
         consumptionSnapshot.forEach(doc => batch.delete(doc.ref));
 
-        // 2. Find and delete invoices
         const invoicesQuery = query(collection(db, "invoices"), where("customerId", "==", customerToDelete.id), where("ownerId", "==", user.uid));
         const invoicesSnapshot = await getDocs(invoicesQuery);
         invoicesSnapshot.forEach(doc => batch.delete(doc.ref));
 
-        // 3. Delete the customer itself
         const customerRef = doc(db, "customers", customerToDelete.id);
         batch.delete(customerRef);
 
@@ -197,43 +194,43 @@ const Customers = () => {
   }
 
   return (
-    <AlertDialog open={!!customerToDelete} onOpenChange={() => setCustomerToDelete(null)}>
-        <div className="space-y-6">
+    <>
+      <div className="space-y-6">
         <div className="flex items-center justify-between">
             <div>
                 <h2 className="text-3xl font-bold text-foreground">Gerenciar Clientes</h2>
                 <p className="text-muted-foreground">Adicione, edite e organize os dados dos seus clientes.</p>
             </div>
             <Dialog open={isDialogOpen} onOpenChange={handleDialogChange}>
-            <DialogTrigger asChild><Button><PlusCircle className="w-4 h-4 mr-2" />Novo Cliente</Button></DialogTrigger>
-            <DialogContent className="sm:max-w-[425px]">
-                <DialogHeader>
-                <DialogTitle>{editingCustomer ? "Editar Cliente" : "Novo Cliente"}</DialogTitle>
-                <DialogDescription>{editingCustomer ? "Edite as informações do cliente." : "Preencha as informações do novo cliente."}</DialogDescription>
-                </DialogHeader>
-                <form onSubmit={handleSubmit}>
-                <div className="grid gap-4 py-4">
-                    <div className="space-y-2">
-                    <Label htmlFor="name">Nome Completo</Label>
-                    <Input id="name" value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} className={errors.name ? "border-destructive" : ""} />
-                    {errors.name && <p className="text-xs text-destructive">{errors.name}</p>}
-                    </div>
-                    <div className="space-y-2">
-                    <Label htmlFor="phone">Telefone (WhatsApp)</Label>
-                    <Input id="phone" value={formData.phone} onChange={(e) => setFormData({ ...formData, phone: e.target.value })} placeholder="(XX) XXXXX-XXXX" className={errors.phone ? "border-destructive" : ""} />
-                    {errors.phone && <p className="text-xs text-destructive">{errors.phone}</p>}
-                    </div>
-                    <div className="space-y-2">
-                    <Label htmlFor="email">Email</Label>
-                    <Input id="email" type="email" value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} placeholder="exemplo@email.com" className={errors.email ? "border-destructive" : ""} />
-                    {errors.email && <p className="text-xs text-destructive">{errors.email}</p>}
-                    </div>
-                </div>
-                <DialogFooter>
-                    <Button type="submit" disabled={isSubmitting}>{isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Salvar"}</Button>
-                </DialogFooter>
-                </form>
-            </DialogContent>
+              <DialogTrigger asChild><Button><PlusCircle className="w-4 h-4 mr-2" />Novo Cliente</Button></DialogTrigger>
+              <DialogContent className="sm:max-w-[425px]">
+                  <DialogHeader>
+                  <DialogTitle>{editingCustomer ? "Editar Cliente" : "Novo Cliente"}</DialogTitle>
+                  <DialogDescription>{editingCustomer ? "Edite as informações do cliente." : "Preencha as informações do novo cliente."}</DialogDescription>
+                  </DialogHeader>
+                  <form onSubmit={handleSubmit}>
+                  <div className="grid gap-4 py-4">
+                      <div className="space-y-2">
+                      <Label htmlFor="name">Nome Completo</Label>
+                      <Input id="name" value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} className={errors.name ? "border-destructive" : ""} />
+                      {errors.name && <p className="text-xs text-destructive">{errors.name}</p>}
+                      </div>
+                      <div className="space-y-2">
+                      <Label htmlFor="phone">Telefone (WhatsApp)</Label>
+                      <Input id="phone" value={formData.phone} onChange={(e) => setFormData({ ...formData, phone: e.target.value })} placeholder="(XX) XXXXX-XXXX" className={errors.phone ? "border-destructive" : ""} />
+                      {errors.phone && <p className="text-xs text-destructive">{errors.phone}</p>}
+                      </div>
+                      <div className="space-y-2">
+                      <Label htmlFor="email">Email</Label>
+                      <Input id="email" type="email" value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} placeholder="exemplo@email.com" className={errors.email ? "border-destructive" : ""} />
+                      {errors.email && <p className="text-xs text-destructive">{errors.email}</p>}
+                      </div>
+                  </div>
+                  <DialogFooter>
+                      <Button type="submit" disabled={isSubmitting}>{isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Salvar"}</Button>
+                  </DialogFooter>
+                  </form>
+              </DialogContent>
             </Dialog>
         </div>
 
@@ -265,8 +262,9 @@ const Customers = () => {
                 </table>
             </div>
         </div>
-        </div>
+      </div>
 
+      <AlertDialog open={!!customerToDelete} onOpenChange={() => setCustomerToDelete(null)}>
         <AlertDialogContent>
             <AlertDialogHeader>
                 <AlertDialogTitle>Confirmar Exclusão</AlertDialogTitle>
@@ -281,7 +279,8 @@ const Customers = () => {
                 <AlertDialogAction onClick={confirmDelete} disabled={isDeleting} className="bg-destructive hover:bg-destructive/90">{isDeleting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Excluir"}</AlertDialogAction>
             </AlertDialogFooter>
         </AlertDialogContent>
-    </AlertDialog>
+      </AlertDialog>
+    </>
   );
 };
 

@@ -20,9 +20,9 @@ service cloud.firestore {
     }
 
     function idStartsWithUid(docId) {
-      // Check if a document ID starts with the user's UID.
+      // Check if a document ID starts with the user's UID by splitting the string.
       // Used for documents where the ID format is `uid_...`
-      return docId.slice(0, request.auth.uid.size()) == request.auth.uid;
+      return docId.split('_')[0] == request.auth.uid;
     }
     
     function isAdmin() {
@@ -32,7 +32,9 @@ service cloud.firestore {
 
     function ownerUnchanged(ownerIdField) {
       // Ensure the ownerId field is not changed during an update.
-      return request.resource.data[ownerIdField] == resource.data[ownerIdField];
+      // Allow the write if the ownerIdField is not in the request data (not being changed)
+      // or if it is in the request data but the value is the same.
+      return !(ownerIdField in request.resource.data) || request.resource.data[ownerIdField] == resource.data[ownerIdField];
     }
 
     // --- COLLECTIONS ---
