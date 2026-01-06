@@ -22,7 +22,7 @@ service cloud.firestore {
     function idStartsWithUid(docId) {
       // Check if a document ID starts with the user's UID.
       // Used for documents where the ID format is `uid_...`
-      return docId.startsWith(request.auth.uid);
+      return docId.slice(0, request.auth.uid.size()) == request.auth.uid;
     }
     
     function isAdmin() {

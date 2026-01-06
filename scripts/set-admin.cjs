@@ -1,7 +1,12 @@
 const admin = require('firebase-admin');
-const serviceAccount = require('../serviceAccountKey.json'); // Caminho para sua chave de serviço
+const serviceAccount = require('../secrets/serviceAccountKey.json'); // Caminho para sua chave de serviço
 
-const userEmail = 'caciabad@gmail.com'; // Email do usuário para tornar admin
+const userEmail = process.argv[2]; // Email do usuário para tornar admin
+
+if (!userEmail) {
+  console.error('Por favor, forneça um endereço de e-mail como argumento.');
+  process.exit(1);
+}
 
 // Inicializa o Firebase Admin SDK
 try {
