@@ -69,8 +69,8 @@ const Customers = () => {
     if (!user) return;
     setLoading(true);
     try {
-      const q = query(collection(db, "customers"), where("ownerId", "==", user.uid));
-      const querySnapshot = await getDocs(q);
+      const customersCollection = collection(db, "customers");
+      const querySnapshot = await getDocs(customersCollection);
       const customersData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Customer));
       setCustomers(customersData.sort((a, b) => a.name.localeCompare(b.name)));
     } catch (error) {

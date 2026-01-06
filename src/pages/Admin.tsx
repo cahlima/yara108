@@ -1,138 +1,137 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { db } from "@/lib/firebase";
-import { collection, getDocs, doc, setDoc, deleteDoc, query } from "firebase/firestore";
+import { collection, getDocs, doc, updateDoc, deleteDoc, query, where } from "firebase/firestore";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
-import { Loader2, ShieldCheck, Trash2 } from "lucide-react";
+import { Loader2, UserCheck, UserX, Users } from "lucide-react";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
-interface AdminUser {
-  id: string;
+interface ManagedUser {
+  uid: string;
   email: string;
+  name: string;
+  role: 'ADMIN' | 'USER';
+  status: 'PENDING' | 'APPROVED' | 'REJECTED';
 }
 
 const Admin = () => {
-  const { user, loading: authLoading } = useAuth(); // Use auth loading state
-  const [admins, setAdmins] = useState<AdminUser[]>([]);
+  const { user, loading: authLoading } = useAuth();
+  const [pendingUsers, setPendingUsers] = useState<ManagedUser[]>([]);
+  const [approvedUsers, setApprovedUsers] = useState<ManagedUser[]>([]);
   const [loading, setLoading] = useState(true);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [uid, setUid] = useState("");
+  const [actionLoading, setActionLoading] = useState<Record<string, boolean>>({});
 
-  const fetchAdmins = useCallback(async () => {
+  const fetchUsers = useCallback(async () => {
     if (!user) return;
     setLoading(true);
     try {
-      const adminsQuery = query(collection(db, "admins"));
-      const querySnapshot = await getDocs(adminsQuery);
-      const adminsData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AdminUser));
-      setAdmins(adminsData);
+      const usersQuery = query(collection(db, "users"));
+      const querySnapshot = await getDocs(usersQuery);
+      const allUsers = querySnapshot.docs.map(d => d.data() as ManagedUser);
+      
+      setPendingUsers(allUsers.filter(u => u.status === 'PENDING').sort((a,b) => a.name.localeCompare(b.name)));
+      setApprovedUsers(allUsers.filter(u => u.status === 'APPROVED').sort((a,b) => a.name.localeCompare(b.name)));
+
     } catch (error) {
-      if (import.meta.env.DEV) console.error("Erro ao carregar admins:", error);
-      toast.error("Erro ao carregar administradores.");
+      console.error("Erro ao carregar usuários:", error);
+      toast.error("Erro ao carregar a lista de usuários.");
     } finally {
       setLoading(false);
     }
   }, [user]);
 
   useEffect(() => {
-    if (!authLoading) { // Fetch only when auth is ready
-      fetchAdmins();
+    if (!authLoading) {
+      fetchUsers();
     }
-  }, [authLoading, fetchAdmins]);
+  }, [authLoading, fetchUsers]);
 
-  const handleAddAdmin = async () => {
-    if (!uid.trim()) {
-      toast.error("UID do usuário não pode ser vazio.");
-      return;
-    }
-    setIsSubmitting(true);
+  const handleUserAction = async (userId: string, action: 'approve' | 'reject') => {
+    setActionLoading(prev => ({ ...prev, [userId]: true }));
     try {
-      // Here you might want to fetch the user's email from your users collection
-      // For simplicity, we are just storing the UID.
-      await setDoc(doc(db, "admins", uid), { added_at: new Date() });
-      toast.success("Administrador adicionado com sucesso!");
-      setUid("");
-      fetchAdmins(); // Refresh the list
+      const userRef = doc(db, "users", userId);
+      if (action === 'approve') {
+        await updateDoc(userRef, { status: 'APPROVED' });
+        toast.success("Usuário aprovado com sucesso!");
+      } else { // reject
+        // Note: Deleting from Firestore. True deletion from Auth requires a backend function.
+        await deleteDoc(userRef);
+        toast.success("Usuário rejeitado e removido.");
+      }
+      fetchUsers(); // Refresh both lists
     } catch (error) {
-      if (import.meta.env.DEV) console.error("Erro ao adicionar admin:", error);
-      toast.error("Falha ao adicionar administrador.");
+      console.error(`Erro ao ${action} usuário:", error`);
+      toast.error(`Falha ao ${action} o usuário.`);
     } finally {
-      setIsSubmitting(false);
+      setActionLoading(prev => ({ ...prev, [userId]: false }));
     }
   };
-
-  const handleRemoveAdmin = async (adminId: string) => {
-    if (adminId === user?.uid) {
-      toast.error("Você não pode remover a si mesmo.");
-      return;
-    }
-    try {
-      await deleteDoc(doc(db, "admins", adminId));
-      toast.success("Administrador removido com sucesso!");
-      fetchAdmins(); // Refresh the list
-    } catch (error) {
-      if (import.meta.env.DEV) console.error("Erro ao remover admin:", error);
-      toast.error("Falha ao remover administrador.");
-    }
-  };
-
+  
   if (loading || authLoading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <Loader2 className="h-12 w-12 animate-spin text-primary" />
-      </div>
-    );
+    return <div className="flex items-center justify-center h-64"><Loader2 className="h-12 w-12 animate-spin text-primary" /></div>;
   }
 
   return (
-    <div className="space-y-6 max-w-2xl mx-auto">
+    <div className="space-y-8">
       <div>
-        <h2 className="text-3xl font-bold text-foreground">Painel de Administração</h2>
-        <p className="text-muted-foreground">Gerencie os administradores do sistema.</p>
-      </div>
-      
-      <div className="space-y-4">
-        <div className="flex gap-2">
-          <Input
-            type="text"
-            placeholder="UID do Usuário"
-            value={uid}
-            onChange={(e) => setUid(e.target.value)}
-            disabled={isSubmitting}
-          />
-          <Button onClick={handleAddAdmin} disabled={isSubmitting}>
-            {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Adicionar Admin"}
-          </Button>
-        </div>
+        <h2 className="text-3xl font-bold text-foreground">Gerenciamento de Usuários</h2>
+        <p className="text-muted-foreground">Aprove ou rejeite solicitações e visualize usuários ativos.</p>
       </div>
 
-      <div className="space-y-3">
-        <h3 className="text-xl font-semibold">Administradores Atuais</h3>
-        {admins.length > 0 ? (
-          admins.map((admin) => (
-            <div key={admin.id} className="flex items-center justify-between p-3 border rounded-lg bg-card">
-              <div className="flex items-center gap-3">
-                 <ShieldCheck className="h-5 w-5 text-primary" />
-                 <span className="font-mono text-sm">{admin.id}</span>
-                 {admin.id === user?.uid && <span className="text-xs text-muted-foreground">(Você)</span>}
-              </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => handleRemoveAdmin(admin.id)}
-                disabled={admin.id === user?.uid}
-                title={admin.id === user?.uid ? "Não é possível remover a si mesmo" : "Remover"}
-              >
-                <Trash2 className="h-4 w-4 text-destructive" />
-              </Button>
+      <Card>
+        <CardHeader>
+          <CardTitle>Solicitações Pendentes</CardTitle>
+          <CardDescription>Novos usuários aguardando sua aprovação para acessar o sistema.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-4">
+            {pendingUsers.length > 0 ? ( 
+                pendingUsers.map(pUser => (
+                    <div key={pUser.uid} className="flex items-center justify-between p-3 border rounded-lg bg-card">
+                        <div>
+                            <p className="font-medium">{pUser.name}</p>
+                            <p className="text-sm text-muted-foreground">{pUser.email}</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <Button size="sm" variant="outline" onClick={() => handleUserAction(pUser.uid, 'approve')} disabled={actionLoading[pUser.uid]}>{actionLoading[pUser.uid] ? <Loader2 className="h-4 w-4 animate-spin"/> : <UserCheck className="h-4 w-4 mr-2"/>}Aprovar</Button>
+                            <Button size="sm" variant="destructive" onClick={() => handleUserAction(pUser.uid, 'reject')} disabled={actionLoading[pUser.uid]}>{actionLoading[pUser.uid] ? <Loader2 className="h-4 w-4 animate-spin"/> : <UserX className="h-4 w-4 mr-2"/>}Rejeitar</Button>
+                        </div>
+                    </div>
+                ))
+             ) : (<p className="text-muted-foreground text-center py-4">Nenhuma solicitação pendente.</p>)}
+          </div>
+        </CardContent>
+      </Card>
+
+       <Card>
+        <CardHeader>
+          <CardTitle>Usuários Cadastrados</CardTitle>
+          <CardDescription>Lista de todos os usuários com acesso ativo ao sistema.</CardDescription>
+        </CardHeader>
+        <CardContent>
+           <div className="space-y-3">
+                {approvedUsers.length > 0 ? (
+                    approvedUsers.map((aUser) => (
+                        <div key={aUser.uid} className="flex items-center justify-between p-3 border rounded-lg bg-card">
+                            <div>
+                                <p className="font-medium">{aUser.name} <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${aUser.role === 'ADMIN' ? 'bg-primary/10 text-primary' : 'bg-muted-foreground/10 text-muted-foreground'}`}>{aUser.role}</span></p>
+                                <p className="text-sm text-muted-foreground">{aUser.email}</p>
+                            </div>
+                           {user?.uid !== aUser.uid && (
+                             <Button variant="ghost" size="icon" title="Remover (função futura)" disabled>
+                                <Trash2 className="h-4 w-4 text-destructive/50" />
+                             </Button>)
+                            }
+                        </div>
+                    ))
+                    ) : (
+                    <p className="text-muted-foreground text-center py-4">Nenhum usuário aprovado encontrado.</p>
+                    )}
             </div>
-          ))
-        ) : (
-          <p className="text-muted-foreground text-center py-4">Nenhum administrador encontrado.</p>
-        )}
-      </div>
+        </CardContent>
+      </Card>
     </div>
   );
 };

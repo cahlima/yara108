@@ -41,10 +41,12 @@ const AppLayout = ({ isAdmin, children }: AppLayoutProps) => {
                 <ShoppingCart className="h-4 w-4" />
                 Consumo
               </NavLink>
-               <NavLink to="/billing" className={({ isActive }) => navLinkClass(isActive)}>
-                <DollarSign className="h-4 w-4" />
-                Faturamento
-              </NavLink>
+              {isAdmin && (
+                <NavLink to="/billing" className={({ isActive }) => navLinkClass(isActive)}>
+                  <DollarSign className="h-4 w-4" />
+                  Faturamento
+                </NavLink>
+              )}
               <NavLink to="/payments" className={({ isActive }) => navLinkClass(isActive)}>
                 <BarChart className="h-4 w-4" />
                 Pagamentos

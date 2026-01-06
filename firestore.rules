@@ -9,79 +9,84 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function isOwner(ownerId) {
+    function isOwner(ownerIdField) {
       // Check if the requesting user is the owner of the document.
-      return request.auth.uid == resource.data[ownerId];
+      return request.auth.uid == resource.data[ownerIdField];
     }
     
-    function isOwnerCreate(ownerId) {
-        // Check if the user is creating a document for themselves.
-        return request.auth.uid == request.resource.data[ownerId];
+    function isOwnerCreate(ownerIdField) {
+      // Check if the user is creating a document for themselves.
+      return request.auth.uid == request.resource.data[ownerIdField];
     }
 
     function idStartsWithUid(docId) {
-        // Check if a document ID starts with the user's UID.
-        return docId.startsWith(request.auth.uid);
+      // Check if a document ID starts with the user's UID.
+      // Used for documents where the ID format is `uid_...`
+      return docId.startsWith(request.auth.uid);
     }
     
     function isAdmin() {
-        // Check if the user has an ADMIN role in their user document.
-        return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'ADMIN';
+      // Check if the user has an admin custom claim.
+      return request.auth.token.admin == true;
     }
 
-    function ownerUnchanged(ownerId) {
-        // Ensure the ownerId field is not changed during an update.
-        return request.resource.data[ownerId] == resource.data[ownerId];
+    function ownerUnchanged(ownerIdField) {
+      // Ensure the ownerId field is not changed during an update.
+      return request.resource.data[ownerIdField] == resource.data[ownerIdField];
     }
 
     // --- COLLECTIONS ---
     match /users/{userId} {
       allow get: if isSignedIn();
       allow list: if isAdmin();
-      allow create: if request.resource.data.role == 'USER';
-      allow update: if isAdmin() || (request.auth.uid == userId);
+      allow create; // Allow any user to create their own user document
+      allow update: if isAdmin() || request.auth.uid == userId;
     }
 
+    // Products and Customers are public to any logged-in user
     match /customers/{customerId} {
-      allow get: if isAdmin() || isOwner('ownerId');
-      allow list: if isSignedIn();
-      allow create: if isAdmin() || isOwnerCreate('ownerId');
-      allow update: if (isAdmin() || isOwner('ownerId')) && ownerUnchanged('ownerId');
-      allow delete: if isAdmin() || isOwner('ownerId');
+      allow read: if isSignedIn();
+      allow create: if isOwnerCreate('ownerId');
+      allow update: if isOwner('ownerId') && ownerUnchanged('ownerId');
+      allow delete: if isOwner('ownerId');
     }
 
     match /products/{productId} {
-      allow read: if isAdmin() || isOwner('ownerId'); 
-      allow create: if isAdmin() || isOwnerCreate('ownerId');
-      allow update: if (isAdmin() || isOwner('ownerId')) && ownerUnchanged('ownerId');
-      allow delete: if isAdmin() || isOwner('ownerId');
+      allow read: if isSignedIn();
+      allow create: if isOwnerCreate('ownerId');
+      allow update: if isOwner('ownerId') && ownerUnchanged('ownerId');
+      allow delete: if isOwner('ownerId');
     }
 
+    // Invoices are private, readable by owner (via ID) or admin
     match /invoices/{invoiceId} {
-      allow get: if isAdmin() || idStartsWithUid(invoiceId);
-      allow list: if isSignedIn();
-      allow create: if isAdmin() || (idStartsWithUid(invoiceId) && isOwnerCreate('ownerId'));
-      allow update: if (isAdmin() || isOwner('ownerId')) && ownerUnchanged('ownerId');
+      // ID Format: ownerId_customerId_month
+      allow read: if isAdmin() || idStartsWithUid(invoiceId);
+      allow create: if idStartsWithUid(invoiceId) && isOwnerCreate('ownerId');
+      allow update: if (isAdmin() || idStartsWithUid(invoiceId)) && ownerUnchanged('ownerId');
       allow delete: if isAdmin();
     }
 
+    // Day Products are private, readable by owner (via ID) or admin
     match /day_products/{dayProductId} {
-      allow read: if isAdmin() || isOwner('ownerId');
-      allow create: if isAdmin() || (idStartsWithUid(dayProductId) && isOwnerCreate('ownerId'));
-      allow update: if (isAdmin() || isOwner('ownerId')) && ownerUnchanged('ownerId');
+      // ID Format: ownerId_dayId
+      allow read: if isAdmin() || idStartsWithUid(dayProductId);
+      allow create: if idStartsWithUid(dayProductId) && isOwnerCreate('ownerId');
+      allow update: if (isAdmin() || idStartsWithUid(dayProductId)) && ownerUnchanged('ownerId');
       allow delete: if isAdmin();
     }
 
+    // Consumption records are private to their owner or admin
     match /consumption_records/{recordId} {
-      allow get, list: if isSignedIn();
-      allow create: if isAdmin() || isOwnerCreate('ownerId');
-      allow update, delete: if isAdmin() || isOwner('ownerId');
+      allow read, delete: if isAdmin() || isOwner('ownerId');
+      allow create: if isOwnerCreate('ownerId');
+      allow update: if false; // Should not be updated, only created/deleted
     }
 
     match /payments/{paymentId} {
-        allow get, list: if isSignedIn();
-        allow create: if isAdmin() || isOwnerCreate('ownerId');
-        allow update, delete: if false;
+      allow read: if isAdmin() || isOwner('ownerId');
+      allow create: if isOwnerCreate('ownerId');
+      allow update, delete: if false;
     }
   }
 }

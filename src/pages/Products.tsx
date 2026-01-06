@@ -48,21 +48,23 @@ const Products = () => {
     }
     setLoading(true);
     try {
-      const base = collection(db, "products");
-      const q = isAdmin ? base : query(base, where("ownerId", "==", user.uid));
-
-      const querySnapshot = await getDocs(q);
-      const productsData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product));
-      setProducts(productsData.sort((a, b) => a.name.localeCompare(b.name)));
+        const productsCollection = collection(db, "products");
+        const querySnapshot = await getDocs(productsCollection);
+        const productsData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product));
+        setProducts(productsData.sort((a, b) => a.name.localeCompare(b.name)));
     } catch (error) {
-      const err = error as FirestoreError;
-      console.error("Erro ao carregar produtos:", err);
-      toast.error(`Erro ao carregar produtos: ${err.message}`);
-      setProducts([]); 
+        const err = error as FirestoreError;
+        console.error("Erro ao carregar produtos:", err);
+        if (err.code === 'permission-denied' || err.code === 'unauthenticated') {
+            toast.error("Acesso negado. Faça login para ver os produtos.");
+        } else {
+            toast.error(`Erro ao carregar produtos: ${err.message}`);
+        }
+        setProducts([]); 
     } finally {
-      setLoading(false);
+        setLoading(false);
     }
-  }, [user, isAdmin]);
+}, [user]);
 
   useEffect(() => {
     if (authLoading) return;
@@ -94,7 +96,7 @@ const Products = () => {
     const err = error as FirestoreError;
     console.error(`Erro ao ${action} produto:`, err);
     if (err.code === 'permission-denied') {
-      toast.error("Acesso negado. Apenas administradores podem executar esta ação.");
+      toast.error("Acesso negado. Você não tem permissão para executar esta ação.");
     } else {
       toast.error(`Erro ao ${action} produto: ${err.message}`);
     }
@@ -142,8 +144,8 @@ const Products = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user || !isAdmin) {
-      toast.error("Acesso negado. Apenas administradores podem executar esta ação.");
+    if (!user) {
+      toast.error("Acesso negado. Faça login para continuar.");
       return;
     }
 
@@ -163,6 +165,11 @@ const Products = () => {
       const priceNumber = parseFloat(validation.data.price.replace(',', '.'));
 
       if (editingProduct) {
+         if (!isAdmin) {
+            toast.error("Acesso negado. Apenas administradores podem editar produtos.");
+            setIsSubmitting(false);
+            return;
+         }
         await updateDoc(doc(db, "products", editingProduct.id), {
           name: validation.data.name,
           price: priceNumber,
@@ -201,7 +208,6 @@ const Products = () => {
             <h2 className="text-3xl font-bold text-foreground">Gerenciar Produtos</h2>
             <p className="text-muted-foreground">Adicione, edite e organize seus produtos.</p>
           </div>
-          {isAdmin && (
             <Dialog open={isDialogOpen} onOpenChange={handleDialogChange}>
               <DialogTrigger asChild><Button><PlusCircle className="w-4 h-4 mr-2" />Novo Produto</Button></DialogTrigger>
               <DialogContent className="sm:max-w-[425px]">
@@ -222,7 +228,7 @@ const Products = () => {
                       {errors.price && <p className="text-xs text-destructive">{errors.price}</p>}
                     </div>
                      <div className="flex items-center space-x-2">
-                        <Switch id="active-status" checked={formData.active} onCheckedChange={(checked) => setFormData({ ...formData, active: checked })} />
+                        <Switch id="active-status" checked={formData.active} onCheckedChange={(checked) => setFormData({ ...formData, active: checked })} disabled={!isAdmin}/>
                         <Label htmlFor="active-status">Ativo</Label>
                     </div>
                   </div>
@@ -232,7 +238,6 @@ const Products = () => {
                 </form>
               </DialogContent>
             </Dialog>
-          )}
         </div>
 
         <div className="border rounded-lg w-full">

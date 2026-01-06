@@ -6,7 +6,7 @@ import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
 } from "firebase/auth";
-import { doc, setDoc } from "firebase/firestore";
+import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -31,57 +31,47 @@ const Auth = () => {
   const handleAuth = async (mode: "login" | "signup") => {
     setIsLoading(true);
     try {
-      if (mode === "login") {
-        const validatedData = authSchema.parse({ email, password });
-        const userCredential = await signInWithEmailAndPassword(auth, validatedData.email, validatedData.password);
-        
-        // TEMPORARY LOG
-        console.log("LOGIN SUCCESS - UID:", userCredential.user.uid);
+      authSchema.parse({ email, password });
 
+      if (mode === "login") {
+        await signInWithEmailAndPassword(auth, email, password);
         toast.success("Login bem-sucedido!");
         navigate("/");
       } else { // signup
-        const validatedData = authSchema.parse({ email, password });
-        const userCredential = await createUserWithEmailAndPassword(
-          auth,
-          validatedData.email,
-          validatedData.password
-        );
+        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
         const user = userCredential.user;
-        
-        // Your logic was correct: Check for the admin email
-        const isAdminEmail = user.email === "caciabad@gmail.com";
 
-        // Now, we automate your manual fix:
-        // If the user is an admin, create a document in the 'admins' collection.
-        if (isAdminEmail) {
-          const adminDocRef = doc(db, "admins", user.uid);
-          await setDoc(adminDocRef, {
-            email: user.email,
-            added_at: new Date().toISOString(),
-          });
-           toast.info("Privilégios de administrador concedidos.");
-        }
+        const isAdmin = user.email === "caciabad@gmail.com";
+        const userRef = doc(db, "users", user.uid);
 
-        // Create the standard customer/user profile
-        await setDoc(doc(db, "customers", user.uid), {
-          id: user.uid,
+        await setDoc(userRef, {
+          uid: user.uid,
           email: user.email,
           name: user.email.split('@')[0],
-          approved: isAdminEmail, // This field can still be useful
-          created_at: new Date().toISOString(),
+          role: isAdmin ? 'ADMIN' : 'USER',
+          status: isAdmin ? 'APPROVED' : 'PENDING',
+          createdAt: serverTimestamp(),
         });
 
-        toast.success("Conta criada com sucesso!");
-        navigate("/");
+        if (isAdmin) {
+          toast.success("Conta de administrador criada e aprovada!");
+        } else {
+          toast.success("Conta criada com sucesso! Aguardando aprovação do administrador.");
+        }
+        
+        // Log out the user immediately after signup so they can't access the app
+        await auth.signOut();
+        
+        // Reset form and navigate to login, so they can try to log in after approval
+        setEmail("");
+        setPassword("");
+        navigate("/login");
+
       }
     } catch (error) {
       if (error instanceof ZodError) {
         toast.error(error.errors[0].message);
       } else if (error instanceof FirebaseError) {
-        // TEMPORARY LOG FOR ALL FIREBASE ERRORS
-        console.error("Firebase Auth Error:", { code: error.code, message: error.message });
-
         switch (error.code) {
           case "auth/user-not-found":
           case "auth/wrong-password":
@@ -100,7 +90,7 @@ const Auth = () => {
       } else {
         toast.error("Ocorreu um erro.");
       }
-       if (import.meta.env.DEV) console.error("Authentication error:", error);
+      if (import.meta.env.DEV) console.error("Authentication error:", error);
     } finally {
       setIsLoading(false);
     }
