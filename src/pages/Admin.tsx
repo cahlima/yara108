@@ -5,7 +5,7 @@ import { collection, getDocs, doc, updateDoc, deleteDoc, query, where } from "fi
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
-import { Loader2, UserCheck, UserX, Users } from "lucide-react";
+import { Loader2, UserCheck, UserX, Users, Trash2 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 interface ManagedUser {
@@ -29,7 +29,8 @@ const Admin = () => {
     try {
       const usersQuery = query(collection(db, "users"));
       const querySnapshot = await getDocs(usersQuery);
-      const allUsers = querySnapshot.docs.map(d => d.data() as ManagedUser);
+      const allUsers = querySnapshot.docs.map(d => ({uid: d.id,...(d.data() as Omit<ManagedUser, "uid">),}));
+      //const allUsers = querySnapshot.docs.map(d => d.data() as ManagedUser);
       
       setPendingUsers(allUsers.filter(u => u.status === 'PENDING').sort((a,b) => a.name.localeCompare(b.name)));
       setApprovedUsers(allUsers.filter(u => u.status === 'APPROVED').sort((a,b) => a.name.localeCompare(b.name)));

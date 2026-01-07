@@ -239,10 +239,11 @@ const Consumption = () => {
 
   useEffect(() => {
     if (selectedProduct && !dayProducts.some((p) => p.id === selectedProduct)) {
+      setProductOpen(false); // 🔑 FECHA O SELECT PRIMEIRO
       setSelectedProduct("");
     }
   }, [dayProducts, selectedProduct]);
-
+  
   const addItem = () => {
     if (!selectedCustomer || !selectedProduct) {
       toast.error("Selecione cliente e produto.");
@@ -429,6 +430,10 @@ const Consumption = () => {
       setIsSavingDayProducts(false);
     }
   };
+  const safeSelectedProduct =
+  dayProducts.some(p => p.id === selectedProduct)
+    ? selectedProduct
+    : "";
 
   const totalConsumption = items.reduce((acc, item) => acc + item.subtotal, 0);
 
@@ -493,7 +498,7 @@ const Consumption = () => {
                 </div>
                 <div>
                   <Label>Produto</Label>
-                  <Select open={productOpen} onOpenChange={setProductOpen} value={selectedProduct} onValueChange={setSelectedProduct} disabled={!selectedCustomer || isDayProductsLoading || dayProducts.length === 0}>
+                  <Select open={productOpen} onOpenChange={setProductOpen} value={safeSelectedProduct} onValueChange={setSelectedProduct} disabled={!selectedCustomer || isDayProductsLoading || dayProducts.length === 0}>
                     <SelectTrigger><SelectValue placeholder={dayProducts.length === 0 ? "Adicione produtos do dia" : "Selecione o produto..."} /></SelectTrigger>
                     <SelectContent>{dayProducts.map((p) => (<SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>))}</SelectContent>
                   </Select>
