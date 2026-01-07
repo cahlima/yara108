@@ -7,14 +7,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { DollarSign, Search, Loader2, ListX, ListChecks } from "lucide-react";
+import { DollarSign, Search, Loader2, ListX, ListChecks, TrendingUp } from "lucide-react";
 import { toast } from "sonner";
 
 interface Stats {
-  totalPending: number;
-  totalPaid: number;
-  pendingTransactionsCount: number;
-  paidTransactionsCount: number;
+  totalSales: number;
+  totalToReceive: number;
+  totalReceived: number;
 }
 
 interface SaleRecord {
@@ -40,10 +39,9 @@ interface DailyGroup {
 const Dashboard = () => {
   const { user, loading: authLoading } = useAuth();
   const [stats, setStats] = useState<Stats>({
-    totalPending: 0,
-    totalPaid: 0,
-    pendingTransactionsCount: 0,
-    paidTransactionsCount: 0,
+    totalSales: 0,
+    totalToReceive: 0,
+    totalReceived: 0,
   });
   const [loading, setLoading] = useState(true);
   const [startDate, setStartDate] = useState("");
@@ -55,30 +53,44 @@ const Dashboard = () => {
     if (!user) return;
     setLoading(true);
     try {
-      const salesRef = collection(db, "consumption_records");
-      const q = query(salesRef, where("ownerId", "==", user.uid));
-      const salesSnapshot = await getDocs(q);
-      const salesData = salesSnapshot.docs.map((doc) => doc.data());
+        // 1. Fetch all invoices to calculate invoiced amounts
+        const invoicesRef = collection(db, "invoices");
+        const invoicesQuery = query(invoicesRef, where("ownerId", "==", user.uid));
+        const invoicesSnapshot = await getDocs(invoicesQuery);
 
-      const pendingRecords = salesData.filter((r) => r.payLater);
-      const paidRecords = salesData.filter((r) => !r.payLater);
-      
-      const totalPending = pendingRecords.reduce((sum, r) => sum + Number(r.subtotal), 0) || 0;
-      const totalPaid = paidRecords.reduce((sum, r) => sum + Number(r.subtotal), 0) || 0;
+        let totalInvoiced = 0;
+        let totalToReceiveFromInvoices = 0;
+        let totalReceivedFromInvoices = 0;
 
-      setStats({
-        totalPending,
-        totalPaid,
-        pendingTransactionsCount: pendingRecords.length,
-        paidTransactionsCount: paidRecords.length,
-      });
+        invoicesSnapshot.docs.forEach(doc => {
+            const invoice = doc.data();
+            totalInvoiced += Number(invoice.total) || 0;
+            totalToReceiveFromInvoices += Number(invoice.openTotal) || 0;
+            totalReceivedFromInvoices += Number(invoice.paidTotal) || 0;
+        });
+
+        // 2. Fetch all direct sales (not marked for later payment)
+        const consumptionRef = collection(db, "consumption_records");
+        const directSalesQuery = query(consumptionRef, where("ownerId", "==", user.uid), where("payLater", "==", false));
+        const directSalesSnapshot = await getDocs(directSalesQuery);
+
+        const directSalesTotal = directSalesSnapshot.docs.reduce((sum, doc) => sum + Number(doc.data().subtotal), 0);
+
+        // 3. Combine the stats
+        setStats({
+            totalSales: totalInvoiced + directSalesTotal,
+            totalToReceive: totalToReceiveFromInvoices,
+            totalReceived: totalReceivedFromInvoices + directSalesTotal,
+        });
+
     } catch (error) {
-      if (import.meta.env.DEV) console.error("Erro ao carregar estatísticas:", error);
-      toast.error("Erro ao carregar estatísticas");
+        if (import.meta.env.DEV) console.error("Erro ao carregar estatísticas:", error);
+        toast.error("Erro ao carregar estatísticas. Verifique as regras do Firestore.");
     } finally {
-      setLoading(false);
+        setLoading(false);
     }
-  }, [user]);
+}, [user]);
+
 
   useEffect(() => {
     if (!authLoading) {
@@ -177,26 +189,20 @@ const Dashboard = () => {
 
   const statsCards = [
     {
-      title: "Valor Pendente",
-      value: formatCurrency(stats.totalPending),
-      icon: DollarSign,
-      color: "text-orange-500",
+      title: "Total de Vendas",
+      value: formatCurrency(stats.totalSales),
+      icon: TrendingUp,
+      color: "text-blue-500",
     },
     {
-      title: "Valor Recebido",
-      value: formatCurrency(stats.totalPaid),
-      icon: DollarSign,
-      color: "text-green-500",
-    },
-    {
-      title: "Trans. Pendentes",
-      value: stats.pendingTransactionsCount,
+      title: "Valor a Receber",
+      value: formatCurrency(stats.totalToReceive),
       icon: ListX,
       color: "text-orange-500",
     },
     {
-      title: "Trans. Recebidas",
-      value: stats.paidTransactionsCount,
+      title: "Valor Recebido",
+      value: formatCurrency(stats.totalReceived),
       icon: ListChecks,
       color: "text-green-500",
     },
@@ -257,7 +263,7 @@ const Dashboard = () => {
       </Card>
 
       {!isFiltered && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {statsCards.map((stat) => (
             <Card key={stat.title}>
               <CardHeader className="flex flex-row items-center justify-between pb-2">

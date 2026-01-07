@@ -1,5 +1,5 @@
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { db } from "@/lib/firebase";
 import {
   collection,
@@ -19,8 +19,10 @@ import {
   MoreVertical,
   MessageCircle,
   Info,
-  Send
+  Send,
+  Search
 } from "lucide-react";
+import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
   Accordion,
@@ -89,6 +91,7 @@ const Billing = () => {
   
   const [aggregatedInvoices, setAggregatedInvoices] = useState<AggregatedInvoice[]>([]);
   const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState("");
 
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [selectedAggregate, setSelectedAggregate] = useState<AggregatedInvoice | null>(null);
@@ -252,8 +255,8 @@ const Billing = () => {
   const openDetails = (agg: AggregatedInvoice) => {
     setSelectedAggregate(agg);
     setDetailsOpen(true);
-    setConsumptionDetails({}); // Clear old details
-    setConsumptionLoading({}); // Clear old loading states
+    setConsumptionDetails({});
+    setConsumptionLoading({});
     handleFetchInvoiceDetails(agg.invoiceIds);
   };
 
@@ -273,6 +276,15 @@ const Billing = () => {
     window.open(url, "_blank");
   };
 
+  const filteredInvoices = useMemo(() => {
+    if (!searchTerm) {
+      return aggregatedInvoices;
+    }
+    return aggregatedInvoices.filter((invoice) =>
+      invoice.customerName.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+  }, [searchTerm, aggregatedInvoices]);
+
   if (authLoading || loading) {
     return <div className="flex justify-center items-center h-64"><Loader2 className="h-12 w-12 animate-spin text-primary" /></div>;
   }
@@ -288,17 +300,29 @@ const Billing = () => {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-3xl font-bold text-foreground">Faturamento por Cliente</h2>
           <p className="text-muted-foreground">Clientes com faturas em aberto.</p>
         </div>
+        <div className="relative w-full sm:max-w-xs">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
+            <Input 
+                placeholder="Buscar por cliente..."
+                className="pl-10"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+            />
+        </div>
       </div>
-      {aggregatedInvoices.length === 0 ? (
+      {aggregatedInvoices.length > 0 && filteredInvoices.length === 0 && (
+          <div className="text-center py-16 text-muted-foreground"><Info className="mx-auto h-12 w-12" /><p className="mt-4">Nenhum cliente encontrado com o termo "{searchTerm}".</p></div>
+      )}
+      {filteredInvoices.length === 0 && searchTerm === '' && aggregatedInvoices.length === 0 ? (
         <div className="text-center py-16 text-muted-foreground"><Info className="mx-auto h-12 w-12" /><p className="mt-4">Nenhum cliente com faturas em aberto.</p></div>
       ) : (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {aggregatedInvoices.map((agg) => (
+          {filteredInvoices.map((agg) => (
             <Card key={agg.customerId}>
               <CardHeader className="flex flex-row items-start justify-between pb-2">
                 <CardTitle className="text-lg font-medium">{agg.customerName}</CardTitle>
