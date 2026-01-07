@@ -7,13 +7,14 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { DollarSign, Users, TrendingUp, Search, Loader2 } from "lucide-react";
+import { DollarSign, Search, Loader2, ListX, ListChecks } from "lucide-react";
 import { toast } from "sonner";
 
 interface Stats {
   totalPending: number;
   totalPaid: number;
-  totalCustomers: number;
+  pendingTransactionsCount: number;
+  paidTransactionsCount: number;
 }
 
 interface SaleRecord {
@@ -21,7 +22,7 @@ interface SaleRecord {
     date: Timestamp;
     customer_id: string;
     total_price: number;
-    paid?: boolean; // Assumindo que o campo 'paid' pode existir
+    paid?: boolean;
 }
 
 interface EnrichedSaleRecord {
@@ -36,13 +37,13 @@ interface DailyGroup {
   dayTotal: number;
 }
 
-
 const Dashboard = () => {
   const { user, loading: authLoading } = useAuth();
   const [stats, setStats] = useState<Stats>({
     totalPending: 0,
     totalPaid: 0,
-    totalCustomers: 0,
+    pendingTransactionsCount: 0,
+    paidTransactionsCount: 0,
   });
   const [loading, setLoading] = useState(true);
   const [startDate, setStartDate] = useState("");
@@ -54,30 +55,22 @@ const Dashboard = () => {
     if (!user) return;
     setLoading(true);
     try {
-      const salesRef = collection(db, "consumption_records"); // CORREÇÃO: Coleção correta
-      const customersRef = collection(db, "customers");
-      
-      const q = query(salesRef, where("ownerId", "==", user.uid)); // CORREÇÃO: Campo ownerId
-
-      const [salesSnapshot, customersSnapshot] = await Promise.all([
-        getDocs(q),
-        getDocs(query(customersRef, where("ownerId", "==", user.uid))),
-      ]);
-
+      const salesRef = collection(db, "consumption_records");
+      const q = query(salesRef, where("ownerId", "==", user.uid));
+      const salesSnapshot = await getDocs(q);
       const salesData = salesSnapshot.docs.map((doc) => doc.data());
-      
-      const totalPending = salesData
-        .filter((r) => r.payLater) // CORREÇÃO: Usar payLater
-        .reduce((sum, r) => sum + Number(r.subtotal), 0) || 0;
 
-      const totalPaid = salesData
-        .filter((r) => !r.payLater)
-        .reduce((sum, r) => sum + Number(r.subtotal), 0) || 0;
+      const pendingRecords = salesData.filter((r) => r.payLater);
+      const paidRecords = salesData.filter((r) => !r.payLater);
+      
+      const totalPending = pendingRecords.reduce((sum, r) => sum + Number(r.subtotal), 0) || 0;
+      const totalPaid = paidRecords.reduce((sum, r) => sum + Number(r.subtotal), 0) || 0;
 
       setStats({
         totalPending,
         totalPaid,
-        totalCustomers: customersSnapshot.size || 0,
+        pendingTransactionsCount: pendingRecords.length,
+        paidTransactionsCount: paidRecords.length,
       });
     } catch (error) {
       if (import.meta.env.DEV) console.error("Erro ao carregar estatísticas:", error);
@@ -101,11 +94,10 @@ const Dashboard = () => {
 
     setLoading(true);
     try {
-      // As datas do formulário vêm como yyyy-MM-dd
       const start = startDate;
       const end = endDate;
 
-      const salesRef = collection(db, "consumption_records"); // CORREÇÃO: Coleção correta
+      const salesRef = collection(db, "consumption_records");
       const q = query(
         salesRef,
         where("ownerId", "==", user.uid),
@@ -113,7 +105,7 @@ const Dashboard = () => {
         where("date", "<=", end)
       );
       const querySnapshot = await getDocs(q);
-      const salesData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any)); // Usar 'any' para simplificar a transformação
+      const salesData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
 
       const customerIds = [...new Set(salesData.map(r => r.customer_id).filter(Boolean))];
       
@@ -129,7 +121,7 @@ const Dashboard = () => {
       const groupedByDate: { [key: string]: EnrichedSaleRecord[] } = {};
       
       salesData.forEach(record => {
-        const recordDate = record.date; // O campo 'date' já é yyyy-MM-dd
+        const recordDate = record.date;
         if (!groupedByDate[recordDate]) {
           groupedByDate[recordDate] = [];
         }
@@ -168,7 +160,7 @@ const Dashboard = () => {
   };
   
     const formatDate = (dateString: string) => {
-        const date = new Date(dateString + 'T12:00:00'); // Usar um horário neutro para evitar problemas de fuso
+        const date = new Date(dateString + 'T12:00:00');
         return date.toLocaleDateString("pt-BR", {
             weekday: 'long',
             day: '2-digit',
@@ -185,22 +177,28 @@ const Dashboard = () => {
 
   const statsCards = [
     {
-      title: "Pendente",
+      title: "Valor Pendente",
       value: formatCurrency(stats.totalPending),
       icon: DollarSign,
       color: "text-orange-500",
     },
     {
-      title: "Recebido",
+      title: "Valor Recebido",
       value: formatCurrency(stats.totalPaid),
-      icon: TrendingUp,
+      icon: DollarSign,
       color: "text-green-500",
     },
     {
-      title: "Clientes",
-      value: stats.totalCustomers,
-      icon: Users,
-      color: "text-blue-500",
+      title: "Trans. Pendentes",
+      value: stats.pendingTransactionsCount,
+      icon: ListX,
+      color: "text-orange-500",
+    },
+    {
+      title: "Trans. Recebidas",
+      value: stats.paidTransactionsCount,
+      icon: ListChecks,
+      color: "text-green-500",
     },
   ];
 
@@ -259,7 +257,7 @@ const Dashboard = () => {
       </Card>
 
       {!isFiltered && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           {statsCards.map((stat) => (
             <Card key={stat.title}>
               <CardHeader className="flex flex-row items-center justify-between pb-2">

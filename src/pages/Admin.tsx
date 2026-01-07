@@ -5,7 +5,7 @@ import { collection, getDocs, doc, updateDoc, deleteDoc, query, where } from "fi
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
-import { Loader2, UserCheck, UserX, Users, Trash2 } from "lucide-react";
+import { Loader2, UserCheck, UserX, Trash2 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 interface ManagedUser {
@@ -30,7 +30,6 @@ const Admin = () => {
       const usersQuery = query(collection(db, "users"));
       const querySnapshot = await getDocs(usersQuery);
       const allUsers = querySnapshot.docs.map(d => ({uid: d.id,...(d.data() as Omit<ManagedUser, "uid">),}));
-      //const allUsers = querySnapshot.docs.map(d => d.data() as ManagedUser);
       
       setPendingUsers(allUsers.filter(u => u.status === 'PENDING').sort((a,b) => a.name.localeCompare(b.name)));
       setApprovedUsers(allUsers.filter(u => u.status === 'APPROVED').sort((a,b) => a.name.localeCompare(b.name)));
@@ -57,11 +56,10 @@ const Admin = () => {
         await updateDoc(userRef, { status: 'APPROVED' });
         toast.success("Usuário aprovado com sucesso!");
       } else { // reject
-        // Note: Deleting from Firestore. True deletion from Auth requires a backend function.
         await deleteDoc(userRef);
         toast.success("Usuário rejeitado e removido.");
       }
-      fetchUsers(); // Refresh both lists
+      fetchUsers();
     } catch (error) {
       console.error(`Erro ao ${action} usuário:", error`);
       toast.error(`Falha ao ${action} o usuário.`);

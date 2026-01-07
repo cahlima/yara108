@@ -30,13 +30,10 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
+    Popover,
+    PopoverContent,
+    PopoverTrigger,
+  } from "@/components/ui/popover";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
@@ -121,6 +118,7 @@ const Consumption = () => {
 
   const [consumptionDate, setConsumptionDate] = useState<Date>(new Date());
   const [savedRecords, setSavedRecords] = useState<ConsumptionRecord[]>([]);
+  const [isCalendarOpen, setIsCalendarOpen] = useState(false);
 
   // Loading states
   const [isInitialLoading, setIsInitialLoading] = useState(true);
@@ -355,19 +353,17 @@ const Consumption = () => {
         await runTransaction(db, async (transaction) => {
             const recordRef = doc(db, "consumption_records", record.id);
             
-            // --- FIX: READ FIRST, THEN WRITE ---
             let invoiceRef;
             let invoiceDoc;
             if (record.payLater && record.invoiceId) {
                 invoiceRef = doc(db, "invoices", record.invoiceId);
-                invoiceDoc = await transaction.get(invoiceRef); // 1. READ
+                invoiceDoc = await transaction.get(invoiceRef);
             }
 
-            // 2. NOW, WRITE
-            transaction.delete(recordRef); // WRITE 1
+            transaction.delete(recordRef);
 
             if (invoiceRef && invoiceDoc?.exists()) {
-                transaction.update(invoiceRef, { // WRITE 2
+                transaction.update(invoiceRef, {
                     total: increment(-record.subtotal),
                     openTotal: increment(-record.subtotal),
                 });
@@ -448,14 +444,14 @@ const Consumption = () => {
           <h2 className="text-3xl font-bold text-foreground">Lançar Consumo</h2>
           <p className="text-muted-foreground">Selecione a data para ver e adicionar consumos.</p>
         </div>
-        <Dialog>
-          <DialogTrigger asChild>
+        <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
+          <PopoverTrigger asChild>
             <Button variant={"outline"}><CalendarIcon className="mr-2 h-4 w-4" />{format(consumptionDate, "PPP", { locale: ptBR })}</Button>
-          </DialogTrigger>
-          <DialogContent className="w-auto p-0">
-            <Calendar mode="single" selected={consumptionDate} onSelect={(date) => date && setConsumptionDate(startOfDay(date))} initialFocus />
-          </DialogContent>
-        </Dialog>
+          </PopoverTrigger>
+          <PopoverContent className="w-auto p-0">
+            <Calendar mode="single" selected={consumptionDate} onSelect={(date) => { if (date) { setConsumptionDate(startOfDay(date)); setIsCalendarOpen(false); }}} initialFocus />
+          </PopoverContent>
+        </Popover>
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <Card className="lg:col-span-1">
