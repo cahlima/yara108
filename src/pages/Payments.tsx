@@ -1,7 +1,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { db } from "@/lib/firebase";
-import { collection, query, where, getDocs, doc, runTransaction, Timestamp, FirestoreError, orderBy } from "firebase/firestore";
+import { collection, query, where, getDocs, doc, runTransaction, Timestamp, FirestoreError, orderBy, documentId } from "firebase/firestore";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import { format } from "date-fns";
@@ -12,12 +12,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-// Keep Invoice type, it's useful
 interface Invoice {
   id: string;
-  month: string; // Used for sorting
+  month: string;
   openTotal: number;
-  // other fields are not needed for this component's logic
 }
 
 interface Customer {
@@ -28,33 +26,78 @@ interface Customer {
 const Payments = () => {
   const { user, authLoading } = useAuth();
   const [customers, setCustomers] = useState<Customer[]>([]);
-  const [openInvoices, setOpenInvoices] = useState<Invoice[]>([]); // Store invoices to be paid
+  const [openInvoices, setOpenInvoices] = useState<Invoice[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState("");
   const [amount, setAmount] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("PIX");
   const [loading, setLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0); // Used to trigger a re-fetch
 
-  // Fetch customers once
+  // Fetch only customers with open invoices
   useEffect(() => {
-    const fetchCustomers = async () => {
+    const fetchCustomersWithDebt = async () => {
       if (!user) return;
       setLoading(true);
       try {
-        const q = query(collection(db, "customers"), where("ownerId", "==", user.uid));
-        const snapshot = await getDocs(q);
-        const customersData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Customer));
-        setCustomers(customersData.sort((a,b) => a.name.localeCompare(b.name)));
+        // 1. Find all open/partial invoices for the user
+        const invoicesQuery = query(
+          collection(db, "invoices"),
+          where("ownerId", "==", user.uid),
+          where("status", "in", ["OPEN", "PARTIAL"])
+        );
+        const invoicesSnapshot = await getDocs(invoicesQuery);
+
+        if (invoicesSnapshot.empty) {
+            setCustomers([]); // No customers with debt
+            setLoading(false);
+            return;
+        }
+
+        // 2. Get the unique customer IDs from those invoices
+        const customerIdsWithDebt = [...new Set(invoicesSnapshot.docs.map(doc => doc.data().customerId as string))];
+
+        // 3. Fetch the details of those specific customers, handling the 30-item limit for 'in' queries
+        if (customerIdsWithDebt.length > 0) {
+            const CHUNK_SIZE = 30; // Firestore 'in' query limit
+            const customerChunks: string[][] = [];
+            for (let i = 0; i < customerIdsWithDebt.length; i += CHUNK_SIZE) {
+                customerChunks.push(customerIdsWithDebt.slice(i, i + CHUNK_SIZE));
+            }
+
+            const customerPromises = customerChunks.map(chunk => {
+                const customersQuery = query(
+                    collection(db, "customers"),
+                    where(documentId(), "in", chunk)
+                );
+                return getDocs(customersQuery);
+            });
+
+            const customerSnapshots = await Promise.all(customerPromises);
+            const customersData: Customer[] = [];
+            customerSnapshots.forEach(snapshot => {
+                snapshot.docs.forEach(doc => {
+                    customersData.push({ id: doc.id, ...doc.data() } as Customer);
+                });
+            });
+
+            setCustomers(customersData.sort((a, b) => a.name.localeCompare(b.name)));
+        } else {
+             setCustomers([]);
+        }
+
       } catch (error) {
-        toast.error("Falha ao carregar clientes.");
+        console.error("Error fetching customers with debt:", error);
+        toast.error("Falha ao carregar a lista de clientes com dívidas.");
       } finally {
         setLoading(false);
       }
     };
+
     if (!authLoading) {
-      fetchCustomers();
+      fetchCustomersWithDebt();
     }
-  }, [user, authLoading]);
+  }, [user, authLoading, refreshKey]);
 
   // This will be triggered when a customer is selected
   const handleCustomerChange = useCallback(async (customerId: string) => {
@@ -72,7 +115,7 @@ const Payments = () => {
         where("ownerId", "==", user.uid),
         where("customerId", "==", customerId),
         where("status", "in", ["OPEN", "PARTIAL"]),
-        orderBy("month") // Sort by month to pay oldest first
+        orderBy("month")
       );
       const snapshot = await getDocs(q);
       const invoicesData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Invoice));
@@ -83,7 +126,7 @@ const Payments = () => {
         const totalDebt = invoicesData.reduce((sum, inv) => sum + inv.openTotal, 0);
         setAmount(totalDebt.toFixed(2).replace('.', ','));
       } else {
-        toast.info("Este cliente não possui faturas em aberto.");
+        toast.info("Este cliente já não possui faturas em aberto.");
         setAmount("");
       }
     } catch (error) {
@@ -116,43 +159,39 @@ const Payments = () => {
     try {
         await runTransaction(db, async (transaction) => {
             let remainingAmountToPay = paymentAmount;
+            const invoiceRefs = openInvoices.map(invoice => doc(db, "invoices", invoice.id));
+            const invoiceDocs = await Promise.all(invoiceRefs.map(ref => transaction.get(ref)));
+            const updates = [];
 
-            // Use the already fetched and sorted openInvoices
-            for (const invoice of openInvoices) {
+            for (let i = 0; i < openInvoices.length; i++) {
                 if (remainingAmountToPay <= 0) break;
-
-                const invoiceRef = doc(db, "invoices", invoice.id);
-                const invoiceDoc = await transaction.get(invoiceRef);
+                const invoiceDoc = invoiceDocs[i];
                 if (!invoiceDoc.exists()) {
-                    throw new Error(`Fatura ${invoice.id} não encontrada.`);
+                    throw new Error(`Fatura ${openInvoices[i].id} não encontrada.`);
                 }
                 const invoiceData = invoiceDoc.data();
-                
-                // Determine how much of the payment to apply to this invoice
                 const amountToApply = Math.min(remainingAmountToPay, invoiceData.openTotal);
-
                 if (amountToApply <= 0) continue;
-
                 const newPaidTotal = invoiceData.paidTotal + amountToApply;
                 const newOpenTotal = invoiceData.openTotal - amountToApply;
-                const newStatus = newOpenTotal <= 0.001 ? "PAID" : "PARTIAL"; // Use tolerance for float comparison
-
-                transaction.update(invoiceRef, {
-                    paidTotal: newPaidTotal,
-                    openTotal: newOpenTotal < 0 ? 0 : newOpenTotal,
-                    status: newStatus,
-                    updatedAt: Timestamp.now(),
+                const newStatus = newOpenTotal <= 0.001 ? "PAID" : "PARTIAL";
+                updates.push({
+                    ref: invoiceRefs[i],
+                    data: {
+                        paidTotal: newPaidTotal,
+                        openTotal: newOpenTotal < 0 ? 0 : newOpenTotal,
+                        status: newStatus,
+                        updatedAt: Timestamp.now(),
+                    }
                 });
-
                 remainingAmountToPay -= amountToApply;
             }
 
-            // Create a single payment record for the customer, not tied to an invoice
+            updates.forEach(u => transaction.update(u.ref, u.data));
             const paymentRef = doc(collection(db, "payments"));
             transaction.set(paymentRef, {
                 ownerId: user.uid,
                 customerId: selectedCustomer,
-                // invoiceId is intentionally omitted
                 amount: paymentAmount,
                 method: paymentMethod,
                 paidAt: format(new Date(), "yyyy-MM-dd"),
@@ -162,14 +201,12 @@ const Payments = () => {
 
         toast.success("Pagamento registrado com sucesso!");
         
-        // Reset form
         setSelectedCustomer("");
         setOpenInvoices([]);
         setAmount("");
         setPaymentMethod("PIX");
+        setRefreshKey(oldKey => oldKey + 1); // Trigger re-fetch of customer list
         
-        // Optionally, re-fetch customer data to update the view, but resetting is enough here.
-
     } catch (e) {
         const err = e as FirestoreError;
         console.error("Erro ao registrar pagamento:", err);
@@ -199,36 +236,40 @@ const Payments = () => {
                     <div>
                         <Label>Cliente</Label>
                         <Select onValueChange={handleCustomerChange} value={selectedCustomer}>
-                            <SelectTrigger><SelectValue placeholder="Selecione o cliente..."/></SelectTrigger>
+                            <SelectTrigger>
+                               <SelectValue placeholder={customers.length > 0 ? "Selecione o cliente com dívidas..." : "Nenhum cliente com dívidas"}/>
+                            </SelectTrigger>
                             <SelectContent>
                                 {customers.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
                             </SelectContent>
                         </Select>
                     </div>
 
-                    {/* The invoice selection is removed */}
+                    {selectedCustomer && (
+                        <>
+                            <div>
+                                <Label htmlFor="amount">Valor do Pagamento (R$)</Label>
+                                <Input id="amount" value={amount} onChange={e => setAmount(e.target.value)} type="text" inputMode="decimal" placeholder="0,00"/>
+                            </div>
 
-                    <div>
-                        <Label htmlFor="amount">Valor do Pagamento (R$)</Label>
-                        <Input id="amount" value={amount} onChange={e => setAmount(e.target.value)} type="text" inputMode="decimal" placeholder="0,00"/>
-                    </div>
-
-                    <div>
-                        <Label>Método de Pagamento</Label>
-                        <Select onValueChange={setPaymentMethod} value={paymentMethod}>
-                            <SelectTrigger><SelectValue/></SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="PIX">PIX</SelectItem>
-                                <SelectItem value="DINHEIRO">Dinheiro</SelectItem>
-                                <SelectItem value="CARTAO">Cartão</SelectItem>
-                            </SelectContent>
-                        </Select>
-                    </div>
-                    
-                    <Button type="submit" className="w-full" disabled={isSubmitting || !selectedCustomer || openInvoices.length === 0}>
-                        {isSubmitting ? <Loader2 className="h-4 w-4 mr-2 animate-spin"/> : <DollarSign className="h-4 w-4 mr-2"/>}
-                        Registrar Pagamento
-                    </Button>
+                            <div>
+                                <Label>Método de Pagamento</Label>
+                                <Select onValueChange={setPaymentMethod} value={paymentMethod}>
+                                    <SelectTrigger><SelectValue/></SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="PIX">PIX</SelectItem>
+                                        <SelectItem value="DINHEIRO">Dinheiro</SelectItem>
+                                        <SelectItem value="CARTAO">Cartão</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                            
+                            <Button type="submit" className="w-full" disabled={isSubmitting || !selectedCustomer || openInvoices.length === 0}>
+                                {isSubmitting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <DollarSign className="h-4 w-4 mr-2" />}
+                                Registrar Pagamento
+                            </Button>
+                        </>
+                    )}
                 </form>
             </CardContent>
         </Card>

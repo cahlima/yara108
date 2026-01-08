@@ -8,7 +8,6 @@ import {
   getDocs,
   doc,
   getDoc,
-  FirestoreError,
 } from "firebase/firestore";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
@@ -43,6 +42,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogDescription,
+  DialogFooter,
 } from "@/components/ui/dialog";
 import {
   DropdownMenu,
@@ -171,25 +171,9 @@ const Billing = () => {
       fetchInvoices();
     }
   }, [authLoading, fetchInvoices]);
-
-  const handleFetchInvoiceDetails = useCallback(async (invoiceIds: string[]) => {
-    if (!user) return;
-    setDetailsLoading(true);
-    try {
-        const invoiceDocs = await Promise.all(invoiceIds.map(id => getDoc(doc(db, "invoices", id))));
-        const invoices = invoiceDocs
-            .map(d => ({id: d.id, ...d.data()}) as Invoice)
-            .filter(inv => inv.openTotal > 0);
-        setDetailedInvoices(invoices.sort((a,b) => b.month.localeCompare(a.month)));
-    } catch(e) {
-        toast.error("Erro ao carregar os detalhes das faturas.");
-    } finally {
-        setDetailsLoading(false);
-    }
-  }, [user]);
-
-  const fetchConsumptionForInvoice = useCallback(async (invoiceId: string | undefined) => {
-    if (!user || !invoiceId || consumptionDetails[invoiceId]) return;
+  
+  const fetchConsumptionForInvoice = useCallback(async (invoiceId: string) => {
+    if (!user || !invoiceId) return;
 
     setConsumptionLoading(prev => ({ ...prev, [invoiceId]: true }));
     try {
@@ -212,52 +196,88 @@ const Billing = () => {
         }
 
         const sortedDailyConsumption = Object.values(dailyMap).sort((a, b) => a.date.localeCompare(b.date));
-
+        
         setConsumptionDetails(prev => ({ ...prev, [invoiceId]: sortedDailyConsumption }));
 
     } catch (e) {
         console.error("Erro ao buscar consumo:", e);
         toast.error("Erro ao detalhar consumo da fatura.");
+        setConsumptionDetails(prev => ({...prev, [invoiceId]: []})); // Salva array vazio em caso de erro
     } finally {
         setConsumptionLoading(prev => ({ ...prev, [invoiceId]: false }));
     }
-  }, [user, consumptionDetails]);
-  
- const handleSendConsumption = (customer: AggregatedInvoice | null, invoice: Invoice, details: DailyConsumption[]) => {
-    if (!customer || !details || details.length === 0) {
-        toast.error("Não há dados de consumo para enviar.");
+  }, [user]);
+
+  const handleSendFullSummary = () => {
+    if (!selectedAggregate || !detailedInvoices.length) {
+        toast.error("Não há dados de faturas para enviar.");
         return;
     }
-    const phone = customer.customerPhone?.replace(/\D/g, "");
+
+    const phone = selectedAggregate.customerPhone?.replace(/\D/g, "");
     if (!phone) {
-      toast.error("Telefone do cliente não cadastrado.");
-      return;
+        toast.error("Telefone do cliente não cadastrado.");
+        return;
     }
 
-    let message = `Olá, ${customer.customerName}! Salve Deus. Segue o detalhamento da sua fatura de ${format(parseISO(invoice.month + '-02'), "MMMM/yyyy", { locale: ptBR })}:\n\n`;
-    
-    details.forEach(day => {
-        message += `*${format(parseISO(day.date), "dd/MM/yyyy")}* - Total: R$ ${day.total.toFixed(2).replace('.', ',')}\n`;
-        day.records.forEach(r => {
-            message += `  - ${r.product_name} (x${r.quantity}): R$ ${r.subtotal.toFixed(2).replace('.', ',')}\n`;
-        });
+    const allConsumptionLoaded = detailedInvoices.every(inv => consumptionLoading[inv.id] === false);
+    if (!allConsumptionLoaded) {
+        toast.info("Aguarde o carregamento de todos os detalhes de consumo antes de enviar.");
+        return;
+    }
+
+    let message = `Olá, ${selectedAggregate.customerName}! Salve Deus. Segue o resumo completo das suas faturas em aberto na Cantina da Mãe Yara:\n\n`;
+
+    detailedInvoices.forEach(invoice => {
+        message += `--- *${format(parseISO(invoice.month + '-02'), "MMMM/yyyy", { locale: ptBR })}* ---\n`;
+        message += `Total da Fatura: R$ ${invoice.openTotal.toFixed(2).replace('.', ',')}\n`;
+
+        const details = consumptionDetails[invoice.id];
+        if (details && details.length > 0) {
+            details.forEach(day => {
+                message += `  *${format(parseISO(day.date), "dd/MM/yyyy")}*: R$ ${day.total.toFixed(2).replace('.', ',')}\n`;
+                day.records.forEach(r => {
+                    message += `    - ${r.product_name} (x${r.quantity}): R$ ${r.subtotal.toFixed(2).replace('.', ',')}\n`;
+                });
+            });
+        } else {
+            message += `  (Nenhum detalhe de consumo para esta fatura)\n`;
+        }
         message += `\n`;
     });
 
-    message += `*Total da fatura:* R$ ${invoice.openTotal.toFixed(2).replace('.', ',')}\n`;
-    message += `*Dívida Total (incluindo outras faturas):* R$ ${customer.totalOpen.toFixed(2).replace('.', ',')}\n\n`;
+    message += `*DÍVIDA TOTAL:* R$ ${selectedAggregate.totalOpen.toFixed(2).replace('.', ',')}\n\n`;
     message += `Para pagar, utilize o PIX: alamanto@hotmail.com.br`;
 
     const url = `https://wa.me/55${phone}?text=${encodeURIComponent(message)}`;
     window.open(url, "_blank");
-  }
+  };
 
-  const openDetails = (agg: AggregatedInvoice) => {
+  const openDetails = async (agg: AggregatedInvoice) => {
     setSelectedAggregate(agg);
     setDetailsOpen(true);
     setConsumptionDetails({});
     setConsumptionLoading({});
-    handleFetchInvoiceDetails(agg.invoiceIds);
+    setDetailedInvoices([]);
+
+    setDetailsLoading(true);
+    try {
+        const invoiceDocs = await Promise.all(agg.invoiceIds.map(id => getDoc(doc(db, "invoices", id))));
+        const invoices = invoiceDocs
+            .map(d => ({id: d.id, ...d.data()}) as Invoice)
+            .filter(inv => inv.openTotal > 0)
+            .sort((a,b) => b.month.localeCompare(a.month));
+
+        setDetailedInvoices(invoices);
+
+        if (invoices.length > 0) {
+            await Promise.all(invoices.map(inv => fetchConsumptionForInvoice(inv.id)));
+        }
+    } catch(e) {
+        toast.error("Erro ao carregar os detalhes das faturas.");
+    } finally {
+        setDetailsLoading(false);
+    }
   };
 
   const handleCharge = (agg: AggregatedInvoice) => {
@@ -341,53 +361,63 @@ const Billing = () => {
         <DialogContent className="max-w-2xl" aria-describedby="dialog-description">
           <DialogHeader>
             <DialogTitle>Detalhes da Dívida - {selectedAggregate?.customerName}</DialogTitle>
-            <DialogDescription id="dialog-description">Faturas em aberto que compõem o valor total devido.</DialogDescription>
+            <DialogDescription id="dialog-description">
+                Um resumo de todas as faturas em aberto e seus consumos. O valor total da dívida é de R$ {selectedAggregate?.totalOpen.toFixed(2).replace('.',',')}.
+            </DialogDescription>
           </DialogHeader>
           {detailsLoading ? (
             <div className="flex items-center justify-center py-6"><Loader2 className="h-8 w-8 animate-spin" /></div>
           ) : (
-            <div className="max-h-[70vh] overflow-y-auto pr-2">
-              {detailedInvoices.length > 0 ? (
-                <Accordion type="single" collapsible className="w-full space-y-3" onValueChange={fetchConsumptionForInvoice}>
-                  {detailedInvoices.map((invoice) => (
-                    <AccordionItem value={invoice.id} key={invoice.id} className="border rounded-md px-3">
-                      <AccordionTrigger>
-                          <div className="flex justify-between w-full items-center pr-4">
-                            <span className="font-semibold capitalize text-base">{format(parseISO(invoice.month + '-02'), "MMMM/yyyy", { locale: ptBR })}</span>
-                            <span className="font-medium text-destructive text-lg">R$ {invoice.openTotal.toFixed(2).replace('.', ',')}</span>
-                          </div>
-                      </AccordionTrigger>
-                      <AccordionContent>
-                        {consumptionLoading[invoice.id] ? (
-                            <Loader2 className="h-6 w-6 animate-spin mx-auto my-4" />
-                        ) : (
-                           consumptionDetails[invoice.id] && consumptionDetails[invoice.id].length > 0 ? (
-                            <div className="space-y-4 pt-2">
-                               {consumptionDetails[invoice.id].map(daily => (
-                                   <div key={daily.date} className="text-sm">
-                                       <p className="font-bold text-muted-foreground">{format(parseISO(daily.date), "dd/MM/yyyy")} - Total: R$ {daily.total.toFixed(2).replace('.', ',')}</p>
-                                       <ul className="list-disc list-inside pl-4 text-gray-600">
-                                           {daily.records.map(rec => (
-                                               <li key={rec.id}>{rec.product_name} (x{rec.quantity}) - R$ {rec.subtotal.toFixed(2).replace('.', ',')}</li>
-                                           ))}
-                                       </ul>
-                                   </div>
-                               ))}
-                               <Button size="sm" className="w-full mt-4" onClick={() => handleSendConsumption(selectedAggregate, invoice, consumptionDetails[invoice.id])}>
-                                   <Send className="w-4 h-4 mr-2"/>
-                                   Enviar Detalhes da Fatura
-                               </Button>
-                            </div>
-                           ) : <p className="text-center text-sm text-muted-foreground py-4">Nenhum consumo encontrado para esta fatura.</p>
-                        )}
-                      </AccordionContent>
-                    </AccordionItem>
-                  ))}
-                </Accordion>
-              ) : (
-                 <p className="text-sm text-center text-muted-foreground py-4">Nenhuma fatura em aberto encontrada para este cliente.</p>
-              )}
-            </div>
+            <>
+                <div className="max-h-[60vh] overflow-y-auto pr-2 space-y-3">
+                  {detailedInvoices.length > 0 ? (
+                      <Accordion type="multiple" className="w-full">
+                        {detailedInvoices.map((invoice) => (
+                          <AccordionItem value={invoice.id} key={invoice.id} className="border rounded-md px-3">
+                            <AccordionTrigger>
+                                <div className="flex justify-between w-full items-center pr-4">
+                                  <span className="font-semibold capitalize text-base">{format(parseISO(invoice.month + '-02'), "MMMM/yyyy", { locale: ptBR })}</span>
+                                  <span className="font-medium text-destructive text-lg">R$ {invoice.openTotal.toFixed(2).replace('.', ',')}</span>
+                                </div>
+                            </AccordionTrigger>
+                            <AccordionContent>
+                              {consumptionLoading[invoice.id] === true ? (
+                                  <Loader2 className="h-6 w-6 animate-spin mx-auto my-4" />
+                              ) : (
+                                consumptionDetails[invoice.id] && consumptionDetails[invoice.id].length > 0 ? (
+                                  <div className="space-y-4 pt-2">
+                                    {consumptionDetails[invoice.id].map(daily => (
+                                        <div key={daily.date} className="text-sm">
+                                            <p className="font-bold text-muted-foreground">{format(parseISO(daily.date), "dd/MM/yyyy")} - Total: R$ {daily.total.toFixed(2).replace('.', ',')}</p>
+                                            <ul className="list-disc list-inside pl-4 text-gray-600">
+                                                {daily.records.map(rec => (
+                                                    <li key={rec.id}>{rec.product_name} (x{rec.quantity}) - R$ {rec.subtotal.toFixed(2).replace('.', ',')}</li>
+                                                ))}
+                                            </ul>
+                                        </div>
+                                    ))}
+                                  </div>
+                                ) : <p className="text-center text-sm text-muted-foreground py-4">Nenhum consumo encontrado para esta fatura.</p>
+                              )}
+                            </AccordionContent>
+                          </AccordionItem>
+                        ))}
+                      </Accordion>
+                  ) : (
+                    <p className="text-sm text-center text-muted-foreground py-4">Nenhuma fatura em aberto encontrada para este cliente.</p>
+                  )}
+                </div>
+                <DialogFooter className="mt-4">
+                    <Button 
+                        className="w-full" 
+                        onClick={handleSendFullSummary}
+                        disabled={detailsLoading || Object.values(consumptionLoading).some(v => v === true)}
+                    >
+                        <Send className="w-4 h-4 mr-2"/>
+                        {detailsLoading || Object.values(consumptionLoading).some(v => v === true) ? 'Carregando detalhes...' : 'Enviar Resumo Completo por WhatsApp'}
+                    </Button>
+                </DialogFooter>
+            </>
           )}
         </DialogContent>
       </Dialog>

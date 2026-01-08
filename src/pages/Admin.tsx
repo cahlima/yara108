@@ -1,12 +1,24 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { db } from "@/lib/firebase";
-import { collection, getDocs, doc, updateDoc, deleteDoc, query, where } from "firebase/firestore";
+import { collection, getDocs, doc, updateDoc, deleteDoc, query } from "firebase/firestore";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
-import { Loader2, UserCheck, UserX, Trash2 } from "lucide-react";
+import { Loader2, UserCheck, UserX, Trash2, ShieldCheck, ShieldOff } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+
 
 interface ManagedUser {
   uid: string;
@@ -48,21 +60,38 @@ const Admin = () => {
     }
   }, [authLoading, fetchUsers]);
 
-  const handleUserAction = async (userId: string, action: 'approve' | 'reject') => {
+  const handleUserAction = async (userId: string, action: 'approve' | 'reject' | 'delete' | 'promote' | 'demote') => {
+    if (!user || user.uid === userId && (action === 'delete' || action === 'demote')) {
+        toast.warning("Você não pode executar esta ação em sua própria conta.");
+        return;
+    }
+
     setActionLoading(prev => ({ ...prev, [userId]: true }));
     try {
       const userRef = doc(db, "users", userId);
-      if (action === 'approve') {
-        await updateDoc(userRef, { status: 'APPROVED' });
-        toast.success("Usuário aprovado com sucesso!");
-      } else { // reject
-        await deleteDoc(userRef);
-        toast.success("Usuário rejeitado e removido.");
+      switch(action) {
+        case 'approve':
+            await updateDoc(userRef, { status: 'APPROVED' });
+            toast.success("Usuário aprovado com sucesso!");
+            break;
+        case 'reject':
+        case 'delete':
+            await deleteDoc(userRef);
+            toast.success(action === 'reject' ? "Usuário rejeitado e removido." : "Usuário removido com sucesso.");
+            break;
+        case 'promote':
+            await updateDoc(userRef, { role: 'ADMIN' });
+            toast.success("Usuário promovido a Administrador!");
+            break;
+        case 'demote':
+            await updateDoc(userRef, { role: 'USER' });
+            toast.success("Privilégios de Administrador removidos.");
+            break;
       }
-      fetchUsers();
+      fetchUsers(); // Re-fetch all users to update lists
     } catch (error) {
-      console.error(`Erro ao ${action} usuário:", error`);
-      toast.error(`Falha ao ${action} o usuário.`);
+      console.error(`Erro ao ${action} usuário:`, error);
+      toast.error(`Falha ao executar a ação no usuário.`);
     } finally {
       setActionLoading(prev => ({ ...prev, [userId]: false }));
     }
@@ -76,7 +105,7 @@ const Admin = () => {
     <div className="space-y-8">
       <div>
         <h2 className="text-3xl font-bold text-foreground">Gerenciamento de Usuários</h2>
-        <p className="text-muted-foreground">Aprove ou rejeite solicitações e visualize usuários ativos.</p>
+        <p className="text-muted-foreground">Aprove ou rejeite solicitações e gerencie usuários ativos e seus privilégios.</p>
       </div>
 
       <Card>
@@ -119,10 +148,33 @@ const Admin = () => {
                                 <p className="text-sm text-muted-foreground">{aUser.email}</p>
                             </div>
                            {user?.uid !== aUser.uid && (
-                             <Button variant="ghost" size="icon" title="Remover (função futura)" disabled>
-                                <Trash2 className="h-4 w-4 text-destructive/50" />
-                             </Button>)
-                            }
+                            <div className="flex items-center gap-2">
+                                {aUser.role !== 'ADMIN' ? (
+                                    <Button variant="outline" size="sm" onClick={() => handleUserAction(aUser.uid, 'promote')} disabled={actionLoading[aUser.uid]}>{actionLoading[aUser.uid] ? <Loader2 className="h-4 w-4 animate-spin"/> : <ShieldCheck className="h-4 w-4 mr-2"/>}Promover</Button>
+                                ) : (
+                                    <Button variant="outline" size="sm" onClick={() => handleUserAction(aUser.uid, 'demote')} disabled={actionLoading[aUser.uid]}>{actionLoading[aUser.uid] ? <Loader2 className="h-4 w-4 animate-spin"/> : <ShieldOff className="h-4 w-4 mr-2"/>}Remover Admin</Button>
+                                )}
+
+                                <AlertDialog>
+                                    <AlertDialogTrigger asChild>
+                                        <Button variant="destructive" size="sm" disabled={actionLoading[aUser.uid]}>{actionLoading[aUser.uid] ? <Loader2 className="h-4 w-4 animate-spin"/> : <Trash2 className="h-4 w-4 mr-2"/>}Remover</Button>
+                                    </AlertDialogTrigger>
+                                    <AlertDialogContent>
+                                        <AlertDialogHeader>
+                                        <AlertDialogTitle>Você tem certeza?</AlertDialogTitle>
+                                        <AlertDialogDescription>
+                                            Esta ação removerá permanentemente o usuário <span className="font-bold">{aUser.name}</span>. 
+                                            Isso não pode ser desfeito.
+                                        </AlertDialogDescription>
+                                        </AlertDialogHeader>
+                                        <AlertDialogFooter>
+                                        <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                                        <AlertDialogAction onClick={() => handleUserAction(aUser.uid, 'delete')}>Confirmar Remoção</AlertDialogAction>
+                                        </AlertDialogFooter>
+                                    </AlertDialogContent>
+                                </AlertDialog>
+                            </div>
+                           )}
                         </div>
                     ))
                     ) : (

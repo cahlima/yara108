@@ -1,6 +1,6 @@
 
 import { NavLink, useNavigate } from "react-router-dom";
-import { Home, ShoppingCart, Users, DollarSign, BarChart, Settings, LogOut, FileText } from "lucide-react";
+import { Home, ShoppingCart, Users, DollarSign, BarChart, Settings, LogOut, FileText, LineChart } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { auth } from "@/lib/firebase";
 import React from "react";
@@ -41,12 +41,6 @@ const AppLayout = ({ isAdmin, children }: AppLayoutProps) => {
                 <ShoppingCart className="h-4 w-4" />
                 Consumo
               </NavLink>
-              {isAdmin && (
-                <NavLink to="/billing" className={({ isActive }) => navLinkClass(isActive)}>
-                  <DollarSign className="h-4 w-4" />
-                  Faturamento
-                </NavLink>
-              )}
               <NavLink to="/payments" className={({ isActive }) => navLinkClass(isActive)}>
                 <BarChart className="h-4 w-4" />
                 Pagamentos
@@ -60,10 +54,20 @@ const AppLayout = ({ isAdmin, children }: AppLayoutProps) => {
                 Clientes
               </NavLink>
               {isAdmin && (
-                <NavLink to="/admin" className={({ isActive }) => navLinkClass(isActive)}>
-                  <Settings className="h-4 w-4" />
-                  Admin
-                </NavLink>
+                <>
+                  <NavLink to="/billing" className={({ isActive }) => navLinkClass(isActive)}>
+                    <DollarSign className="h-4 w-4" />
+                    Débitos em Aberto
+                  </NavLink>
+                  <NavLink to="/billing-report" className={({ isActive }) => navLinkClass(isActive)}>
+                    <LineChart className="h-4 w-4" />
+                    Relatório de Faturamento
+                  </NavLink>
+                  <NavLink to="/admin" className={({ isActive }) => navLinkClass(isActive)}>
+                    <Settings className="h-4 w-4" />
+                    Admin
+                  </NavLink>
+                </>
               )}
             </nav>
           </div>
