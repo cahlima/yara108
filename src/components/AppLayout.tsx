@@ -1,8 +1,8 @@
 
-import { NavLink, useNavigate } from "react-router-dom";
+import { NavLink } from "react-router-dom";
 import { Home, ShoppingCart, Users, DollarSign, BarChart, Settings, LogOut, FileText, LineChart } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { auth } from "@/lib/firebase";
+import { useAuth } from "@/hooks/useAuth"; // Import useAuth
 import React from "react";
 
 interface AppLayoutProps {
@@ -11,11 +11,11 @@ interface AppLayoutProps {
 }
 
 const AppLayout = ({ isAdmin, children }: AppLayoutProps) => {
-  const navigate = useNavigate();
+  const { signOut } = useAuth(); // Use the signOut from useAuth
 
   const handleLogout = async () => {
-    await auth.signOut();
-    navigate('/login');
+    await signOut();
+    // No need to navigate here, the AuthProvider will handle it
   };
 
   const navLinkClass = (isActive: boolean) =>
