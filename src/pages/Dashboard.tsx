@@ -49,15 +49,26 @@ const Dashboard = () => {
   const [isFiltered, setIsFiltered] = useState(false);
   const [dailyGroups, setDailyGroups] = useState<DailyGroup[]>([]);
 
-  const fetchStats = useCallback(async () => {
-    if (!user) return;
+  const fetchStats = useCallback(async (ownerId: string, start?: string, end?: string) => {
     setLoading(true);
     try {
-        // 1. Fetch all invoices to calculate invoiced amounts
         const invoicesRef = collection(db, "invoices");
-        const invoicesQuery = query(invoicesRef, where("ownerId", "==", user.uid));
-        const invoicesSnapshot = await getDocs(invoicesQuery);
+        const consumptionRef = collection(db, "consumption_records");
 
+        // Base queries
+        let invoicesQuery = query(invoicesRef, where("ownerId", "==", ownerId));
+        let directSalesQuery = query(consumptionRef, where("ownerId", "==", ownerId), where("payLater", "==", false));
+
+        // Apply date filters if they exist
+        if (start && end) {
+            const startDate = Timestamp.fromDate(new Date(start + 'T00:00:00'));
+            const endDate = Timestamp.fromDate(new Date(end + 'T23:59:59'));
+            invoicesQuery = query(invoicesQuery, where("createdAt", ">=", startDate), where("createdAt", "<=", endDate));
+            // We need a different filter for consumptions as they use a date string "yyyy-MM-dd"
+            directSalesQuery = query(directSalesQuery, where("date", ">=", start), where("date", "<=", end));
+        }
+
+        const invoicesSnapshot = await getDocs(invoicesQuery);
         let totalInvoiced = 0;
         let totalToReceiveFromInvoices = 0;
         let totalReceivedFromInvoices = 0;
@@ -69,14 +80,9 @@ const Dashboard = () => {
             totalReceivedFromInvoices += Number(invoice.paidTotal) || 0;
         });
 
-        // 2. Fetch all direct sales (not marked for later payment)
-        const consumptionRef = collection(db, "consumption_records");
-        const directSalesQuery = query(consumptionRef, where("ownerId", "==", user.uid), where("payLater", "==", false));
         const directSalesSnapshot = await getDocs(directSalesQuery);
-
         const directSalesTotal = directSalesSnapshot.docs.reduce((sum, doc) => sum + Number(doc.data().subtotal), 0);
-
-        // 3. Combine the stats
+        
         setStats({
             totalSales: totalInvoiced + directSalesTotal,
             totalToReceive: totalToReceiveFromInvoices,
@@ -84,91 +90,39 @@ const Dashboard = () => {
         });
 
     } catch (error) {
-        if (import.meta.env.DEV) console.error("Erro ao carregar estatísticas:", error);
-        toast.error("Erro ao carregar estatísticas. Verifique as regras do Firestore.");
+        console.error("Erro ao carregar estatísticas:", error);
+        toast.error("Erro ao carregar estatísticas.", {
+            description: "Verifique as regras e índices do Firestore. A consola pode ter mais detalhes."
+        });
     } finally {
         setLoading(false);
     }
-}, [user]);
-
+}, []);
 
   useEffect(() => {
-    if (!authLoading) {
-      fetchStats();
+    if (user && !authLoading) {
+      fetchStats(user.uid);
     }
-  }, [authLoading, fetchStats]);
+  }, [user, authLoading, fetchStats]);
 
   const handleFilter = async () => {
     if (!startDate || !endDate || !user) {
       toast.error("Selecione as datas inicial e final");
       return;
     }
-
+    setIsFiltered(true);
     setLoading(true);
-    try {
-      const start = startDate;
-      const end = endDate;
-
-      const salesRef = collection(db, "consumption_records");
-      const q = query(
-        salesRef,
-        where("ownerId", "==", user.uid),
-        where("date", ">=", start),
-        where("date", "<=", end)
-      );
-      const querySnapshot = await getDocs(q);
-      const salesData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
-
-      const customerIds = [...new Set(salesData.map(r => r.customer_id).filter(Boolean))];
-      
-      const customersMap = new Map<string, string>();
-      if (customerIds.length > 0) {
-        const customersQuery = query(collection(db, "customers"), where("__name__", "in", customerIds));
-        const customersSnapshot = await getDocs(customersQuery);
-        customersSnapshot.forEach(doc => {
-            customersMap.set(doc.id, doc.data().name);
-        });
-      }
-
-      const groupedByDate: { [key: string]: EnrichedSaleRecord[] } = {};
-      
-      salesData.forEach(record => {
-        const recordDate = record.date;
-        if (!groupedByDate[recordDate]) {
-          groupedByDate[recordDate] = [];
-        }
-        
-        const customerName = customersMap.get(record.customer_id) || "Cliente desconhecido";
-
-        groupedByDate[recordDate].push({
-          date: recordDate,
-          customerName,
-          total: Number(record.subtotal),
-        });
-      });
-
-      const groups: DailyGroup[] = Object.entries(groupedByDate).map(([date, records]) => ({
-        date,
-        records,
-        dayTotal: records.reduce((sum, r) => sum + r.total, 0),
-      }));
-
-      setDailyGroups(groups.sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
-      setIsFiltered(true);
-    } catch (error) {
-      if (import.meta.env.DEV) console.error("Erro ao filtrar:", error);
-      toast.error("Erro ao filtrar dados. Verifique os índices do Firestore.");
-    } finally {
-      setLoading(false);
-    }
+    await fetchStats(user.uid, startDate, endDate);
+    setLoading(false);
   };
 
   const clearFilter = () => {
     setStartDate("");
     setEndDate("");
     setIsFiltered(false);
-    setDailyGroups([]);
-    fetchStats();
+    if (user) {
+        fetchStats(user.uid);
+    }
   };
   
     const formatDate = (dateString: string) => {
@@ -193,22 +147,25 @@ const Dashboard = () => {
       value: formatCurrency(stats.totalSales),
       icon: TrendingUp,
       color: "text-blue-500",
+      description: isFiltered ? "Vendas no período selecionado." : "Vendas de todo o período.",
     },
     {
       title: "Valor a Receber",
       value: formatCurrency(stats.totalToReceive),
       icon: ListX,
       color: "text-orange-500",
+      description: isFiltered ? "A receber de faturas do período." : "Total a receber de todas as faturas.",
     },
     {
       title: "Valor Recebido",
       value: formatCurrency(stats.totalReceived),
       icon: ListChecks,
       color: "text-green-500",
+      description: isFiltered ? "Recebido no período selecionado." : "Total recebido (faturas e vendas diretas).",
     },
   ];
 
-  if (authLoading || (loading && !isFiltered)) {
+  if (authLoading || loading) {
     return (
       <div className="flex items-center justify-center h-64">
         <Loader2 className="h-12 w-12 animate-spin text-primary" />
@@ -249,7 +206,7 @@ const Dashboard = () => {
             </div>
             <div className="flex gap-2">
               <Button onClick={handleFilter} disabled={loading}>
-                {loading && isFiltered ? <Loader2 className="h-4 w-4 animate-spin mr-2"/> : <Search className="w-4 h-4 mr-2" />}
+                {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2"/> : <Search className="w-4 w-4 mr-2" />}
                 Filtrar
               </Button>
               {isFiltered && (
@@ -262,7 +219,6 @@ const Dashboard = () => {
         </CardContent>
       </Card>
 
-      {!isFiltered && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {statsCards.map((stat) => (
             <Card key={stat.title}>
@@ -274,53 +230,12 @@ const Dashboard = () => {
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold text-foreground">{stat.value}</div>
+                <p className="text-xs text-muted-foreground">{stat.description}</p>
               </CardContent>
             </Card>
           ))}
         </div>
-      )}
 
-      {isFiltered && (
-        <div className="space-y-6">
-          {loading ? (
-             <div className="flex items-center justify-center h-64">
-                <Loader2 className="h-12 w-12 animate-spin text-primary" />
-            </div>
-          ) : dailyGroups.length === 0 ? (
-            <Card>
-              <CardContent className="py-8 text-center text-muted-foreground">
-                Nenhum registro encontrado no período selecionado.
-              </CardContent>
-            </Card>
-          ) : (
-            dailyGroups.map((group) => (
-              <Card key={group.date}>
-                <CardHeader>
-                  <CardTitle className="text-lg capitalize flex justify-between items-center">
-                    <span>{formatDate(group.date)}</span>
-                    <span className="text-sm font-medium text-muted-foreground">Total do dia: {formatCurrency(group.dayTotal)}</span>
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-3">
-                    {group.records.map((record, index) => (
-                      <div
-                        key={index}
-                        className="flex justify-between items-center py-2 border-b last:border-0"
-                      >
-                        <span className="text-foreground">{record.customerName}</span>
-                        <span className="font-medium text-foreground">
-                          {formatCurrency(record.total)}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-            ))
-          )}
-        </div>
-      )}
     </div>
   );
 };

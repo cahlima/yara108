@@ -174,5 +174,11 @@ All colors MUST be HSL.
 
   body {
     @apply bg-background text-foreground;
+    /* Add a dark overlay and adjust the image position */
+    background-image: linear-gradient(rgba(0, 0, 0, 0.4), rgba(0, 0, 0, 0.4)), url('/images/background.webp');
+    background-size: cover;
+    background-position: center 25%; /* Move the image up to show the face */
+    background-repeat: no-repeat;
+    background-attachment: fixed;
   }
 }
