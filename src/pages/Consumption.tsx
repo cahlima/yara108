@@ -45,7 +45,7 @@ import {
   X,
   Calendar as CalendarIcon,
 } from "lucide-react";
-import { format, startOfDay } from "date-fns";
+import { format, startOfDay, parse } from "date-fns";
 import { Calendar } from "@/components/ui/calendar";
 import {
   Card,
@@ -99,6 +99,7 @@ interface ConsumptionRecord {
   payLater: boolean;
   invoiceId?: string;
   createdAt: Timestamp;
+  date: string;
 }
 
 
@@ -127,6 +128,8 @@ const Consumption = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSavingDayProducts, setIsSavingDayProducts] = useState(false);
   const [isDeleting, setIsDeleting] = useState<string | null>(null); // Track deletion status
+  const [isUpdatingDate, setIsUpdatingDate] = useState<string | null>(null);
+  const [editingPopoverOpen, setEditingPopoverOpen] = useState<Record<string, boolean>>({});
 
   // Day products selection
   const [availableProducts, setAvailableProducts] = useState<Product[]>([]);
@@ -382,6 +385,84 @@ const Consumption = () => {
     }
   };
 
+  const handleUpdateDate = async (record: ConsumptionRecord, newDate: Date) => {
+    if (!user) return;
+    setIsUpdatingDate(record.id);
+
+    const newDateStr = format(newDate, "yyyy-MM-dd");
+    const newMonthStr = format(newDate, "yyyy-MM");
+
+    // Prevent changing to the same date
+    if (newDateStr === record.date) {
+      setIsUpdatingDate(null);
+      return;
+    }
+
+    try {
+      await runTransaction(db, async (transaction) => {
+        const recordRef = doc(db, "consumption_records", record.id);
+
+        // 1. Decrement old invoice if it exists
+        if (record.payLater && record.invoiceId) {
+          const oldInvoiceRef = doc(db, "invoices", record.invoiceId);
+          const oldInvoiceDoc = await transaction.get(oldInvoiceRef);
+          if (oldInvoiceDoc.exists()) {
+            transaction.update(oldInvoiceRef, {
+              total: increment(-record.subtotal),
+              openTotal: increment(-record.subtotal),
+            });
+          }
+        }
+
+        // 2. Increment new invoice if needed
+        let newInvoiceId;
+        if (record.payLater) {
+          newInvoiceId = `${user.uid}_${record.customer_id}_${newMonthStr}`;
+          const newInvoiceRef = doc(db, "invoices", newInvoiceId);
+          const newInvoiceDoc = await transaction.get(newInvoiceRef);
+
+          if (!newInvoiceDoc.exists()) {
+            transaction.set(newInvoiceRef, {
+              ownerId: user.uid,
+              customerId: record.customer_id,
+              month: newMonthStr,
+              total: record.subtotal,
+              paidTotal: 0,
+              openTotal: record.subtotal,
+              status: "OPEN",
+              createdAt: Timestamp.now(),
+            });
+          } else {
+            transaction.update(newInvoiceRef, {
+              total: increment(record.subtotal),
+              openTotal: increment(record.subtotal),
+              updatedAt: Timestamp.now(),
+            });
+          }
+        }
+
+        // 3. Update the consumption record itself
+        const updateData: { date: string; invoiceId?: string } = {
+          date: newDateStr,
+        };
+        if (record.payLater) {
+          updateData.invoiceId = newInvoiceId;
+        }
+        transaction.update(recordRef, updateData);
+      });
+
+      toast.success("Data do lançamento atualizada com sucesso!");
+      setConsumptionDate(startOfDay(newDate)); // Mudar para a nova data para atualizar a visualização
+    } catch (e) {
+      const err = e as FirestoreError;
+      console.error("Erro ao atualizar data do lançamento:", err);
+      toast.error(`Falha ao atualizar data: ${err.message}`);
+    } finally {
+      setIsUpdatingDate(null);
+      setEditingPopoverOpen((prev) => ({ ...prev, [record.id]: false }));
+    }
+  };
+
   useEffect(() => {
     if (!user || isInitialLoading) return;
     fetchDayProducts(consumptionDate, user.uid);
@@ -532,8 +613,30 @@ const Consumption = () => {
                       <span>{record.customer_name}: {record.product_name} (x{record.quantity})</span>
                       <div className="flex items-center gap-2">
                         <span className="font-medium">R$ {record.subtotal.toFixed(2).replace(".", ",")}</span>
+                        
+                        <Popover open={editingPopoverOpen[record.id] || false} onOpenChange={(isOpen) => setEditingPopoverOpen(prev => ({ ...prev, [record.id]: isOpen }))}>
+                          <PopoverTrigger asChild>
+                              <Button variant="ghost" size="icon" disabled={isUpdatingDate === record.id || isDeleting === record.id}>
+                                  {isUpdatingDate === record.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarIcon className="h-4 w-4 text-muted-foreground" />}
+                              </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-auto p-0">
+                              <Calendar
+                                  mode="single"
+                                  selected={parse(record.date, 'yyyy-MM-dd', new Date())}
+                                  onSelect={(date) => {
+                                      if (date) {
+                                          handleUpdateDate(record, date);
+                                      }
+                                  }}
+                                  disabled={(date) => date > new Date()}
+                                  initialFocus
+                              />
+                          </PopoverContent>
+                        </Popover>
+
                         <AlertDialog>
-                          <AlertDialogTrigger asChild><Button variant="ghost" size="icon" disabled={isDeleting === record.id}>{isDeleting === record.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4 text-destructive" />}</Button></AlertDialogTrigger>
+                          <AlertDialogTrigger asChild><Button variant="ghost" size="icon" disabled={isDeleting === record.id || isUpdatingDate === record.id}>{isDeleting === record.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4 text-destructive" />}</Button></AlertDialogTrigger>
                           <AlertDialogContent>
                             <AlertDialogHeader>
                               <AlertDialogTitle>Confirmar Exclusão</AlertDialogTitle>

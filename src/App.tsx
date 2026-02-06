@@ -19,7 +19,8 @@ import {
   NotFound, 
   Payments, 
   Products,
-  PendingApproval
+  PendingApproval,
+  Reports
 } from "@/pages";
 
 const LayoutWrapper = () => {
@@ -76,6 +77,7 @@ function App() {
                 <Route path="admin" element={<Admin />} />
                 <Route path="billing" element={<Billing />} />
                 <Route path="billing-report" element={<BillingReport />} />
+                <Route path="reports" element={<Reports />} />
               </Route>
             </Route>
           </Route>

@@ -61,7 +61,11 @@ const AppLayout = ({ isAdmin, children }: AppLayoutProps) => {
                   </NavLink>
                   <NavLink to="/billing-report" className={({ isActive }) => navLinkClass(isActive)}>
                     <LineChart className="h-4 w-4" />
-                    Relatório de Faturamento
+                    Relatório Diário
+                  </NavLink>
+                  <NavLink to="/reports" className={({ isActive }) => navLinkClass(isActive)}>
+                    <FileText className="h-4 w-4" />
+                    Relatórios
                   </NavLink>
                   <NavLink to="/admin" className={({ isActive }) => navLinkClass(isActive)}>
                     <Settings className="h-4 w-4" />

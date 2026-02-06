@@ -2,7 +2,7 @@
 import { createContext, useContext, useEffect, useState, ReactNode, useCallback } from 'react';
 import { auth, db } from '@/lib/firebase';
 import { User, onAuthStateChanged, signOut as firebaseSignOut } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, onSnapshot } from 'firebase/firestore';
 
 interface AuthContextType {
   user: User | null;
@@ -29,45 +29,67 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const [isAdmin, setIsAdmin] = useState(false);
 
     useEffect(() => {
-        const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-            if (currentUser) {
-                setUser(currentUser);
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+        if (currentUser) {
+            let firestoreUnsubscribe = () => {};
+
+            const processUser = async () => {
                 try {
                     const idTokenResult = await currentUser.getIdTokenResult(true); // Force refresh
                     const userIsAdmin = idTokenResult.claims.admin === true;
-                    setIsAdmin(userIsAdmin);
 
                     if (userIsAdmin) {
-                        // If the user is an admin, they are automatically approved.
+                        setUser(currentUser);
+                        setIsAdmin(true);
                         setIsApproved(true);
+                        setLoading(false);
                     } else {
-                        // For non-admin users, check the 'status' field in Firestore.
                         const userDocRef = doc(db, 'users', currentUser.uid);
-                        const userDoc = await getDoc(userDocRef);
-                        const userIsApproved = userDoc.exists() && userDoc.data().status === 'APPROVED';
-                        setIsApproved(userIsApproved);
+                        firestoreUnsubscribe = onSnapshot(userDocRef, (userDoc) => {
+                            const userIsApproved = userDoc.exists() && userDoc.data()?.status === 'APPROVED';
+                            setUser(currentUser);
+                            setIsAdmin(false);
+                            setIsApproved(userIsApproved);
+                            setLoading(false);
+                        }, (error) => {
+                            console.error("Error with Firestore snapshot listener:", error);
+                            setUser(null);
+                            setIsAdmin(false);
+                            setIsApproved(false);
+                            setLoading(false);
+                        });
                     }
                 } catch (error) {
                     console.error("Error fetching user data or claims:", error);
+                    setUser(null);
                     setIsAdmin(false);
                     setIsApproved(false);
+                    setLoading(false);
                 }
-            } else {
-                // No user is logged in.
-                setUser(null);
-                setIsAdmin(false);
-                setIsApproved(false);
-            }
-            setLoading(false);
-        });
+            };
 
-        return () => unsubscribe();
-    }, []);
+            processUser();
+
+            // Cleanup function for snapshot listener
+            return () => {
+                firestoreUnsubscribe();
+            };
+        } else {
+            // No user, clear all state
+            setUser(null);
+            setIsAdmin(false);
+            setIsApproved(false);
+            setLoading(false);
+        }
+    });
+
+    return () => unsubscribe();
+}, []);
 
     const signOut = useCallback(async () => {
         try {
             await firebaseSignOut(auth);
-            // State clearing is handled by the onAuthStateChanged listener.
+            // State clearing is handled by the onAuthStateChanged listener's else block.
         } catch (error) {
             console.error("Error signing out:", error);
         }

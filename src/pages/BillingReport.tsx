@@ -83,13 +83,25 @@ const BillingReport = () => {
         if (!data.payLater) {
           totalReceived += data.subtotal;
         }
+        
+        let customerName = "Venda direta"; // Nome padrão
 
-        let customerName = customerCache.get(data.customerId);
-        if (!customerName) {
-          const customerRef = doc(db, "customers", data.customerId);
-          const customerSnap = await getDoc(customerRef);
-          customerName = customerSnap.exists() ? customerSnap.data().name : "Cliente não encontrado";
-          customerCache.set(data.customerId, customerName);
+        if (data.customerId && typeof data.customerId === 'string' && data.customerId.trim() !== '') {
+            const cachedName = customerCache.get(data.customerId);
+            if (cachedName) {
+                customerName = cachedName;
+            } else {
+                try {
+                    const customerRef = doc(db, "customers", data.customerId);
+                    const customerSnap = await getDoc(customerRef);
+                    const fetchedName = customerSnap.exists() ? customerSnap.data().name : "Cliente não encontrado";
+                    customerCache.set(data.customerId, fetchedName);
+                    customerName = fetchedName;
+                } catch (e) {
+                    console.error(`Falha ao buscar cliente com ID: ${data.customerId}`, e);
+                    customerName = "Erro ao buscar cliente";
+                }
+            }
         }
 
         records.push({

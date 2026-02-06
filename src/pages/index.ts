@@ -10,3 +10,4 @@ export { default as Payments } from './Payments';
 export { default as Products } from './Products';
 export { default as PendingApproval } from './PendingApproval'; // Barrel export
 export { default as BillingReport } from './BillingReport';
+export { default as Reports } from './Reports';
