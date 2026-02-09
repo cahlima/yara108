@@ -18,6 +18,7 @@ import {
   Dashboard, 
   NotFound, 
   Payments, 
+  PaymentHistory, // IMPORTADO
   Products,
   PendingApproval,
   Reports
@@ -70,6 +71,7 @@ function App() {
               <Route path="dashboard" element={<Dashboard />} />
               <Route path="consumption" element={<Consumption />} />
               <Route path="payments" element={<Payments />} />
+              <Route path="payment-history" element={<PaymentHistory />} /> {/* ADICIONADO */}
               <Route path="products" element={<Products />} />
               <Route path="customers" element={<Customers />} />
               

@@ -1,21 +1,23 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { db } from "@/lib/firebase";
-import { collection, query, where, getDocs, doc, runTransaction, Timestamp, FirestoreError, orderBy, documentId } from "firebase/firestore";
+import { collection, query, where, getDocs, orderBy, documentId } from "firebase/firestore";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
-import { format } from "date-fns";
 import { Loader2, DollarSign } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea"; // Importação adicionada
+import { registerPayment } from "@/lib/payments"; // Importação adicionada
 
 interface Invoice {
   id: string;
   month: string;
   openTotal: number;
+  total: number;
 }
 
 interface Customer {
@@ -24,23 +26,22 @@ interface Customer {
 }
 
 const Payments = () => {
-  const { user, authLoading } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [openInvoices, setOpenInvoices] = useState<Invoice[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState("");
   const [amount, setAmount] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("PIX");
+  const [note, setNote] = useState(""); // Estado para a observação
   const [loading, setLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [refreshKey, setRefreshKey] = useState(0); // Used to trigger a re-fetch
+  const [refreshKey, setRefreshKey] = useState(0);
 
-  // Fetch only customers with open invoices
   useEffect(() => {
     const fetchCustomersWithDebt = async () => {
       if (!user) return;
       setLoading(true);
       try {
-        // 1. Find all open/partial invoices for the user
         const invoicesQuery = query(
           collection(db, "invoices"),
           where("ownerId", "==", user.uid),
@@ -49,17 +50,15 @@ const Payments = () => {
         const invoicesSnapshot = await getDocs(invoicesQuery);
 
         if (invoicesSnapshot.empty) {
-            setCustomers([]); // No customers with debt
+            setCustomers([]);
             setLoading(false);
             return;
         }
 
-        // 2. Get the unique customer IDs from those invoices
         const customerIdsWithDebt = [...new Set(invoicesSnapshot.docs.map(doc => doc.data().customerId as string))];
 
-        // 3. Fetch the details of those specific customers, handling the 30-item limit for 'in' queries
         if (customerIdsWithDebt.length > 0) {
-            const CHUNK_SIZE = 30; // Firestore 'in' query limit
+            const CHUNK_SIZE = 30;
             const customerChunks: string[][] = [];
             for (let i = 0; i < customerIdsWithDebt.length; i += CHUNK_SIZE) {
                 customerChunks.push(customerIdsWithDebt.slice(i, i + CHUNK_SIZE));
@@ -99,9 +98,9 @@ const Payments = () => {
     }
   }, [user, authLoading, refreshKey]);
 
-  // This will be triggered when a customer is selected
   const handleCustomerChange = useCallback(async (customerId: string) => {
     setSelectedCustomer(customerId);
+    setNote("");
     if (!customerId) {
         setOpenInvoices([]);
         setAmount("");
@@ -150,53 +149,20 @@ const Payments = () => {
     }
     
     const totalDebt = openInvoices.reduce((sum, inv) => sum + inv.openTotal, 0);
-    if (paymentAmount > totalDebt) {
+    if (paymentAmount > totalDebt + 0.01) { // Adiciona pequena margem para erros de ponto flutuante
         toast.error(`O valor do pagamento (R$ ${paymentAmount.toFixed(2)}) não pode ser maior que a dívida total (R$ ${totalDebt.toFixed(2)}).`);
         return;
     }
 
     setIsSubmitting(true);
     try {
-        await runTransaction(db, async (transaction) => {
-            let remainingAmountToPay = paymentAmount;
-            const invoiceRefs = openInvoices.map(invoice => doc(db, "invoices", invoice.id));
-            const invoiceDocs = await Promise.all(invoiceRefs.map(ref => transaction.get(ref)));
-            const updates = [];
-
-            for (let i = 0; i < openInvoices.length; i++) {
-                if (remainingAmountToPay <= 0) break;
-                const invoiceDoc = invoiceDocs[i];
-                if (!invoiceDoc.exists()) {
-                    throw new Error(`Fatura ${openInvoices[i].id} não encontrada.`);
-                }
-                const invoiceData = invoiceDoc.data();
-                const amountToApply = Math.min(remainingAmountToPay, invoiceData.openTotal);
-                if (amountToApply <= 0) continue;
-                const newPaidTotal = invoiceData.paidTotal + amountToApply;
-                const newOpenTotal = invoiceData.openTotal - amountToApply;
-                const newStatus = newOpenTotal <= 0.001 ? "PAID" : "PARTIAL";
-                updates.push({
-                    ref: invoiceRefs[i],
-                    data: {
-                        paidTotal: newPaidTotal,
-                        openTotal: newOpenTotal < 0 ? 0 : newOpenTotal,
-                        status: newStatus,
-                        updatedAt: Timestamp.now(),
-                    }
-                });
-                remainingAmountToPay -= amountToApply;
-            }
-
-            updates.forEach(u => transaction.update(u.ref, u.data));
-            const paymentRef = doc(collection(db, "payments"));
-            transaction.set(paymentRef, {
-                ownerId: user.uid,
-                customerId: selectedCustomer,
-                amount: paymentAmount,
-                method: paymentMethod,
-                paidAt: format(new Date(), "yyyy-MM-dd"),
-                createdAt: Timestamp.now(),
-            });
+        await registerPayment({
+            user,
+            customerId: selectedCustomer,
+            paymentAmount,
+            paymentMethod,
+            note,
+            invoicesToPay: openInvoices
         });
 
         toast.success("Pagamento registrado com sucesso!");
@@ -205,12 +171,12 @@ const Payments = () => {
         setOpenInvoices([]);
         setAmount("");
         setPaymentMethod("PIX");
-        setRefreshKey(oldKey => oldKey + 1); // Trigger re-fetch of customer list
+        setNote("");
+        setRefreshKey(oldKey => oldKey + 1);
         
-    } catch (e) {
-        const err = e as FirestoreError;
-        console.error("Erro ao registrar pagamento:", err);
-        toast.error(`Falha ao registrar pagamento: ${err.message}`);
+    } catch (e: any) {
+        console.error("Erro ao registrar pagamento:", e);
+        toast.error(`Falha ao registrar pagamento: ${e.message}`);
     } finally {
         setIsSubmitting(false);
     }
@@ -262,6 +228,11 @@ const Payments = () => {
                                         <SelectItem value="CARTAO">Cartão</SelectItem>
                                     </SelectContent>
                                 </Select>
+                            </div>
+
+                            <div>
+                                <Label htmlFor="note">Observação (Opcional)</Label>
+                                <Textarea id="note" value={note} onChange={e => setNote(e.target.value)} placeholder="Ex: Pagamento da primeira parcela, referente ao serviço X..."/>
                             </div>
                             
                             <Button type="submit" className="w-full" disabled={isSubmitting || !selectedCustomer || openInvoices.length === 0}>

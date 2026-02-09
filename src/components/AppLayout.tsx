@@ -1,6 +1,6 @@
 
 import { NavLink } from "react-router-dom";
-import { Home, ShoppingCart, Users, DollarSign, BarChart, Settings, LogOut, FileText, LineChart } from "lucide-react";
+import { Home, ShoppingCart, Users, DollarSign, BarChart, Settings, LogOut, FileText, LineChart, History } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth"; // Import useAuth
 import React from "react";
@@ -44,6 +44,10 @@ const AppLayout = ({ isAdmin, children }: AppLayoutProps) => {
               <NavLink to="/payments" className={({ isActive }) => navLinkClass(isActive)}>
                 <BarChart className="h-4 w-4" />
                 Pagamentos
+              </NavLink>
+              <NavLink to="/payment-history" className={({ isActive }) => navLinkClass(isActive)}>
+                <History className="h-4 w-4" />
+                Histórico
               </NavLink>
               <NavLink to="/products" className={({ isActive }) => navLinkClass(isActive)}>
                 <ShoppingCart className="h-4 w-4" />

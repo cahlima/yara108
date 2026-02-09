@@ -7,6 +7,7 @@ export { default as Customers } from './Customers';
 export { default as Dashboard } from './Dashboard';
 export { default as NotFound } from './NotFound';
 export { default as Payments } from './Payments';
+export { default as PaymentHistory } from './PaymentHistory';
 export { default as Products } from './Products';
 export { default as PendingApproval } from './PendingApproval'; // Barrel export
 export { default as BillingReport } from './BillingReport';
