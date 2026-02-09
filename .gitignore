@@ -1,20 +1,31 @@
 
-# build output
-dist
-dist-ssr
-dist-scripts
+# Dependencies
+node_modules/
 
-# dependencies
-node_modules
+# Build artifacts
+dist/
+dist-scripts/
+.firebase/
 
-# IDEs and editors
-.idea
-.vscode
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
+# Environment variables
+.env
+.env.*
+!/.env.example
 
-# misc
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
+
+# Compiled files
+src/lib/firebase.js
+
+# Cache
+.vite/
+.yarn/cache
+.npm/
+
+# OS-specific
 .DS_Store
-npm-debug.log
+Thumbs.db
