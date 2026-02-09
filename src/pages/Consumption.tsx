@@ -388,40 +388,55 @@ const Consumption = () => {
   const handleUpdateDate = async (record: ConsumptionRecord, newDate: Date) => {
     if (!user) return;
     setIsUpdatingDate(record.id);
-
+  
     const newDateStr = format(newDate, "yyyy-MM-dd");
     const newMonthStr = format(newDate, "yyyy-MM");
-
+  
     // Prevent changing to the same date
     if (newDateStr === record.date) {
       setIsUpdatingDate(null);
       return;
     }
-
+  
     try {
       await runTransaction(db, async (transaction) => {
         const recordRef = doc(db, "consumption_records", record.id);
-
-        // 1. Decrement old invoice if it exists
-        if (record.payLater && record.invoiceId) {
-          const oldInvoiceRef = doc(db, "invoices", record.invoiceId);
-          const oldInvoiceDoc = await transaction.get(oldInvoiceRef);
-          if (oldInvoiceDoc.exists()) {
-            transaction.update(oldInvoiceRef, {
-              total: increment(-record.subtotal),
-              openTotal: increment(-record.subtotal),
-            });
-          }
+  
+        // Invoice IDs (only if payLater)
+        const oldInvoiceId =
+          record.payLater && record.invoiceId ? record.invoiceId : undefined;
+  
+        const newInvoiceId = record.payLater
+          ? `${user.uid}_${record.customer_id}_${newMonthStr}`
+          : undefined;
+  
+        // If the invoice doesn't change (same month), just update the record date.
+        if (record.payLater && oldInvoiceId && newInvoiceId && oldInvoiceId === newInvoiceId) {
+          transaction.update(recordRef, { date: newDateStr });
+          return;
         }
-
-        // 2. Increment new invoice if needed
-        let newInvoiceId;
-        if (record.payLater) {
-          newInvoiceId = `${user.uid}_${record.customer_id}_${newMonthStr}`;
-          const newInvoiceRef = doc(db, "invoices", newInvoiceId);
-          const newInvoiceDoc = await transaction.get(newInvoiceRef);
-
-          if (!newInvoiceDoc.exists()) {
+  
+        const oldInvoiceRef = oldInvoiceId ? doc(db, "invoices", oldInvoiceId) : null;
+        const newInvoiceRef = newInvoiceId ? doc(db, "invoices", newInvoiceId) : null;
+  
+        // ✅ 1) ALL READS FIRST
+        const oldInvoiceSnap = oldInvoiceRef ? await transaction.get(oldInvoiceRef) : null;
+        const newInvoiceSnap = newInvoiceRef ? await transaction.get(newInvoiceRef) : null;
+  
+        // ✅ 2) THEN ALL WRITES
+  
+        // Decrement old invoice if exists
+        if (oldInvoiceRef && oldInvoiceSnap?.exists()) {
+          transaction.update(oldInvoiceRef, {
+            total: increment(-record.subtotal),
+            openTotal: increment(-record.subtotal),
+            updatedAt: Timestamp.now(),
+          });
+        }
+  
+        // Increment / create new invoice if needed
+        if (newInvoiceRef) {
+          if (!newInvoiceSnap?.exists()) {
             transaction.set(newInvoiceRef, {
               ownerId: user.uid,
               customerId: record.customer_id,
@@ -440,19 +455,21 @@ const Consumption = () => {
             });
           }
         }
-
-        // 3. Update the consumption record itself
+  
+        // Update the consumption record itself
         const updateData: { date: string; invoiceId?: string } = {
           date: newDateStr,
         };
+  
         if (record.payLater) {
           updateData.invoiceId = newInvoiceId;
         }
+  
         transaction.update(recordRef, updateData);
       });
-
+  
       toast.success("Data do lançamento atualizada com sucesso!");
-      setConsumptionDate(startOfDay(newDate)); // Mudar para a nova data para atualizar a visualização
+      setConsumptionDate(startOfDay(newDate)); // atualiza a visualização pra nova data
     } catch (e) {
       const err = e as FirestoreError;
       console.error("Erro ao atualizar data do lançamento:", err);
@@ -462,6 +479,7 @@ const Consumption = () => {
       setEditingPopoverOpen((prev) => ({ ...prev, [record.id]: false }));
     }
   };
+  
 
   useEffect(() => {
     if (!user || isInitialLoading) return;
