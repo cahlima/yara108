@@ -79,11 +79,18 @@ service cloud.firestore {
     }
 
     // Consumption records are private to their owner or admin
-    match /consumption_records/{recordId} {
-      allow read, delete: if isAdmin() || isOwner('ownerId');
-      allow create: if isOwnerCreate('ownerId');
-      allow update: if false; // Should not be updated, only created/deleted
-    }
+  match /consumption_records/{recordId} {
+  allow read, delete: if isAdmin() || isOwner('ownerId');
+  allow create: if isOwnerCreate('ownerId');
+
+  // ✅ Permitir update restrito (apenas date e invoiceId)
+  allow update: if (isAdmin() || isOwner('ownerId'))
+                && ownerUnchanged('ownerId')
+                && request.resource.data.diff(resource.data)
+                     .changedKeys()
+                     .hasOnly(['date', 'invoiceId']);
+}
+
 
     match /payments/{paymentId} {
       allow read: if isAdmin() || isOwner('ownerId');

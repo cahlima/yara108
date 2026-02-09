@@ -2,7 +2,7 @@ import { Navigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 
 export default function RootRedirect() {
-  const { user, loading, isApproved } = useAuth();
+  const { user, loading, isApproved, isAdmin } = useAuth();
 
   if (loading) {
     return (
@@ -12,13 +12,12 @@ export default function RootRedirect() {
     );
   }
 
-  if (!user) {
-    return <Navigate to="/auth" replace />;
-  }
+  if (!user) return <Navigate to="/auth" replace />;
 
-  if (!isApproved) {
-    return <Navigate to="/pending-approval" replace />;
-  }
+  // ✅ Admin nunca vai para pending approval
+  if (isAdmin) return <Navigate to="/dashboard" replace />;
+
+  if (!isApproved) return <Navigate to="/pending-approval" replace />;
 
   return <Navigate to="/dashboard" replace />;
 }
