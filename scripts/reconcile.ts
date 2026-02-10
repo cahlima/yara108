@@ -1,15 +1,6 @@
 
-import {
-  collection,
-  query,
-  getDocs,
-  writeBatch,
-  doc,
-  where,
-  getDoc,
-  Timestamp,
-} from "firebase/firestore";
-import { db } from "../src/lib/firebase"; // Ajuste o caminho se necessário
+import { adminDb } from "./firebaseAdmin";
+import { Timestamp } from 'firebase-admin/firestore';
 
 // --- TIPOS ---
 interface ConsumptionRecord {
@@ -62,7 +53,7 @@ const reconcileOwnerData = async () => {
   // --- CONFIGURAÇÃO ---
   const args = process.argv.slice(2);
   const ownerIdArg = args.find(arg => arg.startsWith('--owner='));
-  const isDryRun = !args.includes('--commit');
+  const isDryRun = !args.includes('--apply');
 
   if (!ownerIdArg) {
     console.error("Erro: O argumento --owner=<UID> é obrigatório.");
@@ -72,29 +63,23 @@ const reconcileOwnerData = async () => {
 
   console.log(
     `Iniciando reconciliação para ownerId: ${ownerIdToReconcile} em modo ${
-      isDryRun ? "DRY RUN (SIMULAÇÃO)" : "EXECUÇÃO"
+      isDryRun ? "DRY RUN (SIMULAÇÃO)" : "APPLY (EXECUÇÃO)"
     }`
   );
   console.log("------------------------------------------------------");
 
   const results: ReconciliationResult[] = [];
-  const batch = writeBatch(db);
+  const batch = adminDb.batch();
   let fixesMade = 0;
   let missingInvoiceIdFixes = 0;
 
-  // 1. Buscar todos os registros de consumo e pagamento do proprietário
-  const consumptionsQuery = query(
-    collection(db, "consumption_records"),
-    where("ownerId", "==", ownerIdToReconcile)
-  );
-  const paymentsQuery = query(
-    collection(db, "payment_records"),
-    where("ownerId", "==", ownerIdToReconcile)
-  );
+  // 1. Buscar todos os registros de consumo e pagamento do proprietário com o SDK de Admin
+  const consumptionsQuery = adminDb.collection("consumption_records").where("ownerId", "==", ownerIdToReconcile);
+  const paymentsQuery = adminDb.collection("payment_records").where("ownerId", "==", ownerIdToReconcile);
 
   const [consumptionsSnapshot, paymentsSnapshot] = await Promise.all([
-    getDocs(consumptionsQuery),
-    getDocs(paymentsQuery),
+    consumptionsQuery.get(),
+    paymentsQuery.get(),
   ]);
 
   const allConsumptions = consumptionsSnapshot.docs.map(
@@ -114,7 +99,7 @@ const reconcileOwnerData = async () => {
     const expectedInvoiceId = `${record.ownerId}_${record.customer_id}_${month}`;
 
     if (record.invoiceId !== expectedInvoiceId) {
-        const recordRef = doc(db, "consumption_records", record.id);
+        const recordRef = adminDb.collection("consumption_records").doc(record.id);
         batch.update(recordRef, { invoiceId: expectedInvoiceId });
         record.invoiceId = expectedInvoiceId; // Atualiza em memória também
         missingInvoiceIdFixes++;
@@ -127,8 +112,8 @@ const reconcileOwnerData = async () => {
   }
 
   for (const payment of allPayments) {
+    if (!payment.invoiceId) continue; // Ignora pagamentos sem invoiceId
     if (!invoicesToCalculate.has(payment.invoiceId)) {
-      // Pagamento para uma fatura sem consumo, pode ser um erro, mas vamos respeitar.
       invoicesToCalculate.set(payment.invoiceId, { consumptions: [], payments: [] });
     }
     invoicesToCalculate.get(payment.invoiceId)!.payments.push(payment);
@@ -141,14 +126,14 @@ const reconcileOwnerData = async () => {
     const calculatedOpenTotal = Math.max(0, calculatedTotal - calculatedPaidTotal);
     
     let calculatedStatus: "OPEN" | "PARTIAL" | "PAID" = "OPEN";
-    if (calculatedOpenTotal <= 0 && calculatedTotal > 0) {
+    if (calculatedOpenTotal <= 0.01 && calculatedTotal > 0) {
       calculatedStatus = "PAID";
     } else if (calculatedPaidTotal > 0 && calculatedOpenTotal > 0) {
       calculatedStatus = "PARTIAL";
     }
 
-    const invoiceRef = doc(db, "invoices", invoiceId);
-    const invoiceSnap = await getDoc(invoiceRef);
+    const invoiceRef = adminDb.collection("invoices").doc(invoiceId);
+    const invoiceSnap = await invoiceRef.get();
 
     const result: ReconciliationResult = {
         invoiceId,
@@ -164,7 +149,7 @@ const reconcileOwnerData = async () => {
         action: "OK",
     };
 
-    if (!invoiceSnap.exists()) {
+    if (!invoiceSnap.exists) {
       if (calculatedTotal > 0) {
         result.action = "CREATE";
         const [ownerId, customerId, month] = invoiceId.split('_');
@@ -236,9 +221,13 @@ const reconcileOwnerData = async () => {
         console.error("\n❌ ERRO AO APLICAR AS CORREÇÕES:", error);
       }
     } else {
-      console.log("\n(Simulação) Nenhum dado foi alterado. Para aplicar, adicione a flag '--commit'.");
+      console.log("\n(Simulação) Nenhum dado foi alterado. Para aplicar, adicione a flag '--apply'.");
     }
   }
 };
 
-reconcileOwnerData().catch(console.error);
+reconcileOwnerData().catch((error) => {
+  console.error("\n--- ERRO INESPERADO ---");
+  console.error(error);
+  process.exit(1);
+});
