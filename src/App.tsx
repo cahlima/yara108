@@ -8,6 +8,7 @@ import AdminRoute from "@/components/AdminRoute";
 import AppLayout from "@/components/AppLayout";
 import { Loader2 } from "lucide-react";
 
+// 1. IMPORTAR A NOVA PÁGINA
 import { 
   Admin, 
   Auth as LoginPage, 
@@ -16,9 +17,10 @@ import {
   Consumption, 
   Customers, 
   Dashboard, 
+  DailyReport, // <-- ADICIONADO
   NotFound, 
   Payments, 
-  PaymentHistory, // IMPORTADO
+  PaymentHistory,
   Products,
   PendingApproval,
   Reports
@@ -71,7 +73,7 @@ function App() {
               <Route path="dashboard" element={<Dashboard />} />
               <Route path="consumption" element={<Consumption />} />
               <Route path="payments" element={<Payments />} />
-              <Route path="payment-history" element={<PaymentHistory />} /> {/* ADICIONADO */}
+              <Route path="payment-history" element={<PaymentHistory />} />
               <Route path="products" element={<Products />} />
               <Route path="customers" element={<Customers />} />
               
@@ -79,6 +81,8 @@ function App() {
                 <Route path="admin" element={<Admin />} />
                 <Route path="billing" element={<Billing />} />
                 <Route path="billing-report" element={<BillingReport />} />
+                {/* 2. ADICIONAR A NOVA ROTA */}
+                <Route path="daily-report" element={<DailyReport />} /> {/* <-- ADICIONADO */}
                 <Route path="reports" element={<Reports />} />
               </Route>
             </Route>

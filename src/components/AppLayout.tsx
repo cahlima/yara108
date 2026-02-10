@@ -57,12 +57,12 @@ const AppLayout = ({ isAdmin, children }: AppLayoutProps) => {
                 <Users className="h-4 w-4" />
                 Clientes
               </NavLink>
+              <NavLink to="/billing" className={({ isActive }) => navLinkClass(isActive)}>
+                <DollarSign className="h-4 w-4" />
+                Débitos em Aberto
+              </NavLink>
               {isAdmin && (
                 <>
-                  <NavLink to="/billing" className={({ isActive }) => navLinkClass(isActive)}>
-                    <DollarSign className="h-4 w-4" />
-                    Débitos em Aberto
-                  </NavLink>
                   <NavLink to="/billing-report" className={({ isActive }) => navLinkClass(isActive)}>
                     <LineChart className="h-4 w-4" />
                     Relatório Diário

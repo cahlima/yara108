@@ -1,29 +1,16 @@
 
 import * as admin from 'firebase-admin';
 
-// Evita a reinicialização do app se o script for chamado múltiplas vezes.
+// Use a variável de ambiente para as credenciais em produção
+// Para desenvolvimento local, o SDK pode buscar automaticamente se GOOGLE_APPLICATION_CREDENTIALS estiver setado
+// ou se você inicializar com o serviceAccount.
+const serviceAccount = require('../../secrets/serviceAccountKey.json');
+
 if (!admin.apps.length) {
-  try {
-    let credential;
-    // 1. Tenta usar a variável de ambiente com o JSON da service account
-    if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
-      const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
-      credential = admin.credential.cert(serviceAccount);
-    } 
-    // 2. Se não, delega para o SDK procurar GOOGLE_APPLICATION_CREDENTIALS ou outras fontes padrão.
-    else {
-      credential = admin.credential.applicationDefault();
-    }
-
-    admin.initializeApp({
-      credential,
-    });
-    console.log("Firebase Admin SDK inicializado com sucesso.");
-
-  } catch (error) {
-    console.error("Erro ao inicializar Firebase Admin SDK:", error);
-    process.exit(1);
-  }
+  admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount),
+  });
 }
 
-export const adminDb = admin.firestore();
+export const db = admin.firestore();
+export const FieldValue = admin.firestore.FieldValue;

@@ -21,7 +21,6 @@ service cloud.firestore {
     }
     
     function isAdmin() {
-      // O script de reconciliação deve ser executado com um usuário que tenha essa claim.
       return request.auth.token.admin == true;
     }
 
@@ -38,7 +37,9 @@ service cloud.firestore {
     }
 
     match /customers/{customerId} {
-      allow read: if isSignedIn();
+      // CORREÇÃO: Apenas admins podem listar todos os clientes.
+      allow get: if isSignedIn();
+      allow list: if isAdmin(); 
       allow create: if isOwnerCreate('ownerId');
       allow update: if isOwner('ownerId') && ownerUnchanged('ownerId');
       allow delete: if isOwner('ownerId');
@@ -55,7 +56,7 @@ service cloud.firestore {
       allow read: if isAdmin() || idStartsWithUid(invoiceId);
       allow create: if idStartsWithUid(invoiceId) && isOwnerCreate('ownerId');
       allow update: if (isAdmin() || idStartsWithUid(invoiceId)) && ownerUnchanged('ownerId');
-      allow delete: if isAdmin() || isOwner('ownerId'); // Dono pode deletar (se a fatura ficar zerada)
+      allow delete: if isAdmin() || isOwner('ownerId');
     }
 
     match /day_products/{dayProductId} {
@@ -66,21 +67,28 @@ service cloud.firestore {
     }
 
     match /consumption_records/{recordId} {
-      allow read, create: if isOwnerCreate('ownerId') || isOwner('ownerId');
+      // CORREÇÃO: Admins podem listar todos os registros para encontrar débitos.
+      allow get: if isOwner('ownerId');
+      allow list: if isAdmin();
+      allow create: if isOwnerCreate('ownerId') || isOwner('ownerId');
       allow delete: if isAdmin() || isOwner('ownerId');
-      
-      // Update é permitido para o dono/admin.
-      // O admin (script de reconciliação) pode mudar QUALQUER campo, exceto o ownerId.
-      // O usuário normal (front-end) só pode mudar 'date' e 'invoiceId'.
       allow update: if (isAdmin() || isOwner('ownerId')) && ownerUnchanged('ownerId') &&
                     (isAdmin() || request.resource.data.diff(resource.data).changedKeys().hasOnly(['date', 'invoiceId']));
     }
 
-    // ✅ NOVA COLEÇÃO: Histórico de pagamentos. Imutável para usuários normais.
+    // ADICIONADO: Regras para a coleção 'payments' usada no Relatório Diário.
+    match /payments/{paymentId} {
+        allow read: if isAdmin() || isOwner('ownerId');
+        allow create: if isOwnerCreate('ownerId');
+        allow update: if (isAdmin() || isOwner('ownerId')) && ownerUnchanged('ownerId');
+        allow delete: if isAdmin();
+    }
+
     match /payment_records/{recordId} {
       allow read: if isAdmin() || isOwner('ownerId');
       allow create: if isOwnerCreate('ownerId');
-      allow update, delete: if isAdmin(); // Apenas admin pode corrigir/deletar, nunca o usuário.
+      allow update: if (isAdmin() || isOwner('ownerId')) && ownerUnchanged('ownerId');
+      allow delete: if isAdmin();
     }
   }
 }
