@@ -10,8 +10,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea"; // Importação adicionada
-import { registerPayment } from "@/lib/payments"; // Importação adicionada
+import { Textarea } from "@/components/ui/textarea";
+import { registerPayment } from "@/lib/payments";
+import { getCustomerDebt } from "@/lib/debt"; // PASSO 1: Importar a nova função centralizada
 
 interface Invoice {
   id: string;
@@ -32,7 +33,7 @@ const Payments = () => {
   const [selectedCustomer, setSelectedCustomer] = useState("");
   const [amount, setAmount] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("PIX");
-  const [note, setNote] = useState(""); // Estado para a observação
+  const [note, setNote] = useState("");
   const [loading, setLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -42,10 +43,12 @@ const Payments = () => {
       if (!user) return;
       setLoading(true);
       try {
+        // A lógica para encontrar clientes com dívida permanece a mesma,
+        // pois precisamos apenas da lista de clientes que devem algo.
         const invoicesQuery = query(
           collection(db, "invoices"),
           where("ownerId", "==", user.uid),
-          where("status", "in", ["OPEN", "PARTIAL"])
+          where("openTotal", ">", 0) // Uma pequena otimização
         );
         const invoicesSnapshot = await getDocs(invoicesQuery);
 
@@ -58,27 +61,19 @@ const Payments = () => {
         const customerIdsWithDebt = [...new Set(invoicesSnapshot.docs.map(doc => doc.data().customerId as string))];
 
         if (customerIdsWithDebt.length > 0) {
-            const CHUNK_SIZE = 30;
-            const customerChunks: string[][] = [];
-            for (let i = 0; i < customerIdsWithDebt.length; i += CHUNK_SIZE) {
-                customerChunks.push(customerIdsWithDebt.slice(i, i + CHUNK_SIZE));
-            }
-
-            const customerPromises = customerChunks.map(chunk => {
-                const customersQuery = query(
-                    collection(db, "customers"),
-                    where(documentId(), "in", chunk)
-                );
-                return getDocs(customersQuery);
-            });
-
-            const customerSnapshots = await Promise.all(customerPromises);
             const customersData: Customer[] = [];
-            customerSnapshots.forEach(snapshot => {
-                snapshot.docs.forEach(doc => {
+            const chunks = [];
+            for (let i = 0; i < customerIdsWithDebt.length; i += 30) {
+                chunks.push(customerIdsWithDebt.slice(i, i + 30));
+            }
+            
+            for (const chunk of chunks) {
+                const customersQuery = query(collection(db, "customers"), where(documentId(), "in", chunk));
+                const customerSnapshots = await getDocs(customersQuery);
+                customerSnapshots.forEach(doc => {
                     customersData.push({ id: doc.id, ...doc.data() } as Customer);
                 });
-            });
+            }
 
             setCustomers(customersData.sort((a, b) => a.name.localeCompare(b.name)));
         } else {
@@ -109,11 +104,17 @@ const Payments = () => {
     if (!user) return;
     
     try {
+      // PASSO 2: Usar a função centralizada para obter a dívida REAL.
+      const totalDebt = await getCustomerDebt(user.uid, customerId);
+      setAmount(totalDebt.toFixed(2).replace('.', ','));
+
+      // PASSO 3: Continuar buscando as faturas com dívida para o processo de pagamento.
+      // A função `registerPayment` precisa saber em quais faturas aplicar o valor.
       const q = query(
         collection(db, "invoices"),
         where("ownerId", "==", user.uid),
         where("customerId", "==", customerId),
-        where("status", "in", ["OPEN", "PARTIAL"]),
+        where("openTotal", ">", 0), // Lógica consistente
         orderBy("month")
       );
       const snapshot = await getDocs(q);
@@ -121,15 +122,14 @@ const Payments = () => {
       
       setOpenInvoices(invoicesData);
 
-      if (invoicesData.length > 0) {
-        const totalDebt = invoicesData.reduce((sum, inv) => sum + inv.openTotal, 0);
-        setAmount(totalDebt.toFixed(2).replace('.', ','));
-      } else {
-        toast.info("Este cliente já não possui faturas em aberto.");
+      if (invoicesData.length === 0) {
+        // Isso não deve acontecer se getCustomerDebt > 0, mas é uma salvaguarda.
+        toast.info("Este cliente não possui faturas com saldo devedor.");
         setAmount("");
       }
     } catch (error) {
-        toast.error("Falha ao buscar as faturas do cliente.");
+        console.error("Error fetching customer details:", error);
+        toast.error("Falha ao buscar os detalhes da dívida do cliente.");
         setOpenInvoices([]);
         setAmount("");
     }
@@ -148,8 +148,9 @@ const Payments = () => {
         return;
     }
     
-    const totalDebt = openInvoices.reduce((sum, inv) => sum + inv.openTotal, 0);
-    if (paymentAmount > totalDebt + 0.01) { // Adiciona pequena margem para erros de ponto flutuante
+    // A validação continua usando o total calculado pela função centralizada
+    const totalDebt = parseFloat((await getCustomerDebt(user.uid, selectedCustomer)).toFixed(2));
+    if (paymentAmount > totalDebt + 0.01) { 
         toast.error(`O valor do pagamento (R$ ${paymentAmount.toFixed(2)}) não pode ser maior que a dívida total (R$ ${totalDebt.toFixed(2)}).`);
         return;
     }
@@ -162,11 +163,13 @@ const Payments = () => {
             paymentAmount,
             paymentMethod,
             note,
-            invoicesToPay: openInvoices
+            // Envia apenas as faturas que têm saldo devedor para a função de pagamento
+            invoicesToPay: openInvoices.filter(inv => inv.openTotal > 0)
         });
 
         toast.success("Pagamento registrado com sucesso!");
         
+        // Limpa o formulário e força a atualização da lista de clientes
         setSelectedCustomer("");
         setOpenInvoices([]);
         setAmount("");
@@ -187,7 +190,7 @@ const Payments = () => {
   }
 
   return (
-    <div className="space-y-6 max-w-2xl mx-auto">
+    <div className="space-y-6 max-w-2xl mx-auto p-4">
         <div className="text-center">
             <h2 className="text-3xl font-bold text-foreground">Registrar Pagamento</h2>
             <p className="text-muted-foreground">Dê baixa na dívida total ou parcial de seus clientes.</p>
@@ -232,10 +235,10 @@ const Payments = () => {
 
                             <div>
                                 <Label htmlFor="note">Observação (Opcional)</Label>
-                                <Textarea id="note" value={note} onChange={e => setNote(e.target.value)} placeholder="Ex: Pagamento da primeira parcela, referente ao serviço X..."/>
+                                <Textarea id="note" value={note} onChange={e => setNote(e.target.value)} placeholder="Ex: Pagamento da primeira parcela..."/>
                             </div>
                             
-                            <Button type="submit" className="w-full" disabled={isSubmitting || !selectedCustomer || openInvoices.length === 0}>
+                            <Button type="submit" className="w-full" disabled={isSubmitting || !selectedCustomer || !amount}>
                                 {isSubmitting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <DollarSign className="h-4 w-4 mr-2" />}
                                 Registrar Pagamento
                             </Button>
