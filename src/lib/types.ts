@@ -24,7 +24,8 @@ export interface Invoice {
     total: number;
     paidTotal: number;
     openTotal: number;
-    status: 'open' | 'paid' | 'draft';
+    // *** CORREÇÃO SÊNIOR: Padroniza e expande os status das faturas ***
+    status: 'OPEN' | 'PAID' | 'PARTIAL' | 'DRAFT'; 
     items: any[]; // consumption records
     createdAt?: any;
     updatedAt?: any;

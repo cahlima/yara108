@@ -40,9 +40,8 @@ Iniciando reconciliação de pagamentos para o owner: ${ownerId}
   const paymentsByCustomer: { [key: string]: Payment[] } = {};
   allPayments.forEach(payment => {
     if (!payment.customerId) return;
-    if (payment.allocations && payment.allocations.length > 0) {
-      return; 
-    }
+    // *** CORREÇÃO SÊNIOR: Remove a lógica que impedia o reprocessamento de pagamentos já alocados ***
+    // A lógica de alocação é idempotente e segura para ser re-executada.
     (paymentsByCustomer[payment.customerId] = paymentsByCustomer[payment.customerId] || []).push(payment);
   });
   
@@ -62,7 +61,7 @@ Iniciando reconciliação de pagamentos para o owner: ${ownerId}
 
     console.log(`
 ----------------------------------------------------------------
--> Processando Cliente: ${customerId} (${customerInvoices.length} faturas, ${customerPayments.length} pagamentos novos)`);
+-> Processando Cliente: ${customerId} (${customerInvoices.length} faturas, ${customerPayments.length} pagamentos)`);
 
     const { updatedInvoices, updatedPayments, customerCredit } = allocatePaymentsToInvoicesForCustomer(
       customerInvoices,
@@ -128,7 +127,7 @@ Iniciando reconciliação de pagamentos para o owner: ${ownerId}
 Reconciliação Finalizada.
 - Total de clientes com crédito final: ${customersWithCredit}
 - Total de documentos ${apply ? 'atualizados' : 'a serem atualizados'}: ${totalAffectedDocs}.
-Execute com --apply para persistir as mudanças.
+${!apply ? 'Execute com --apply para persistir as mudanças.':''}
 ================================================================
 `);
 }

@@ -30,7 +30,6 @@ export function allocatePaymentsToInvoicesForCustomer(
   let customerCredit = 0;
 
   for (const payment of localPayments) {
-    // Garante que o pagamento tenha um array de alocações para popular
     if (!payment.allocations) {
         payment.allocations = [];
     }
@@ -38,39 +37,36 @@ export function allocatePaymentsToInvoicesForCustomer(
     let remainingPaymentAmount = payment.amount;
 
     for (const invoice of localInvoices) {
-      if (remainingPaymentAmount <= 0.001) break; // Para de alocar se o valor do pagamento acabou
+      if (remainingPaymentAmount <= 0.001) break; 
 
-      // O valor em aberto é o que resta a pagar. Pode já ter recebido pagamentos parciais.
       const openAmount = invoice.openTotal;
-      if (openAmount <= 0.001) continue; // Pula faturas já pagas
+      if (openAmount <= 0.001) continue; 
 
       const amountToAllocate = Math.min(remainingPaymentAmount, openAmount);
       
       payment.allocations.push({ invoiceId: invoice.id, amount: amountToAllocate });
 
-      // Atualiza os totais da fatura localmente
       invoice.paidTotal += amountToAllocate;
       invoice.openTotal -= amountToAllocate;
       
-      // Lida com imprecisões de ponto flutuante, garantindo que o status seja correto
+      // *** CORREÇÃO SÊNIOR DA LÓGICA DE STATUS ***
+      // Garante que o status seja atualizado corretamente com os valores esperados (maiúsculas)
+      // e introduz o status 'PARTIAL' para pagamentos parciais.
       if (invoice.openTotal <= 0.01) { 
-          invoice.openTotal = 0;
-          invoice.status = 'paid';
+          invoice.openTotal = 0; // Zera o valor para evitar imprecisões de ponto flutuante
+          invoice.status = 'PAID';
       } else {
-          invoice.status = 'open';
+          invoice.status = 'PARTIAL';
       }
       
-      // Marca a fatura como atualizada
       updatedInvoicesMap.set(invoice.id, invoice);
       remainingPaymentAmount -= amountToAllocate;
     }
 
-    // Apenas marca o pagamento como atualizado se ele de fato foi usado em alguma alocação.
     if (payment.allocations.length > 0) {
         updatedPaymentsMap.set(payment.id, payment);
     }
 
-    // Se sobrou dinheiro após tentar quitar todas as faturas, vira crédito
     if (remainingPaymentAmount > 0.01) {
         customerCredit += remainingPaymentAmount;
     }

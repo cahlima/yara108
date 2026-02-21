@@ -45,7 +45,6 @@ const DebtDetailModal: React.FC<DebtDetailModalProps> = ({ debtor, isOpen, onClo
                 );
                 const invoicesSnapshot = await getDocs(invoicesQuery);
                 
-                // *** CORREÇÃO APLICADA AQUI: Mostrar TODAS as faturas (débitos e créditos) ***
                 const invoicesData = invoicesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Invoice));
                 setInvoices(invoicesData);
 
@@ -93,21 +92,17 @@ const DebtDetailModal: React.FC<DebtDetailModalProps> = ({ debtor, isOpen, onClo
         
         let message = `Olá, ${debtor.customerName}! Salve Deus. Segue o resumo completo das suas faturas na Cantina da Mãe Yara:\n\n`;
 
-        // Itera sobre as faturas (incluindo débitos e créditos)
         invoices.forEach(invoice => {
             const monthName = format(parse(invoice.month, 'yyyy-MM', new Date()), "MMMM/yyyy", { locale: ptBR });
-            const invoiceTotal = Math.abs(invoice.openTotal).toFixed(2).replace('.', ',');
-            
-            message += `--- ${monthName} ---\n`;
-            if (invoice.openTotal > 0) {
-                message += `Total da Fatura: R$ ${invoiceTotal}\n`;
-            } else if (invoice.openTotal < 0) {
-                message += `Crédito na Fatura: R$ ${invoiceTotal}\n`;
-            } else {
-                message += `Fatura Zerada: R$ 0,00\n`;
-            }
-            
             const invoiceConsumptions = consumptionsByInvoice[invoice.id] || [];
+            const invoiceTotal = invoiceConsumptions.reduce((sum, item) => sum + item.subtotal, 0);
+            const paidAmount = invoiceTotal - invoice.openTotal;
+
+            message += `--- ${monthName} ---\n`;
+            message += `Total consumido: R$ ${invoiceTotal.toFixed(2).replace('.', ',')}\n`;
+            message += `Total pago: R$ ${paidAmount.toFixed(2).replace('.', ',')}\n`;
+            message += `Restante: R$ ${invoice.openTotal.toFixed(2).replace('.', ',')}\n\n`;
+            
             const groupedByDate = invoiceConsumptions.reduce((acc, con) => {
                 const dateObj = con.date?.toDate ? con.date.toDate() : new Date();
                 const formattedDate = format(dateObj, "dd/MM/yyyy");
@@ -153,8 +148,12 @@ const DebtDetailModal: React.FC<DebtDetailModalProps> = ({ debtor, isOpen, onClo
                     ) : (
                         <Accordion type="single" collapsible className="w-full">
                             {invoices.map(invoice => {
-                                if (Math.abs(invoice.openTotal) < 0.01) return null; // Não mostra faturas zeradas
+                                if (invoice.status === 'PAID' && invoice.openTotal === 0) return null;
+
                                 const invoiceConsumptions = consumptionsByInvoice[invoice.id] || [];
+                                const invoiceTotal = invoiceConsumptions.reduce((sum, item) => sum + item.subtotal, 0);
+                                const paidAmount = invoiceTotal - invoice.openTotal;
+
                                 const groupedByDate = invoiceConsumptions.reduce((acc, con) => {
                                     const dateObj = con.date?.toDate ? con.date.toDate() : new Date();
                                     const formattedDate = format(dateObj, "dd/MM/yyyy", { locale: ptBR });
@@ -163,20 +162,39 @@ const DebtDetailModal: React.FC<DebtDetailModalProps> = ({ debtor, isOpen, onClo
                                     return acc;
                                 }, {} as Record<string, { total: number, items: ConsumptionRecord[] }>);
                                 const monthName = format(parse(invoice.month, 'yyyy-MM', new Date()), "MMMM/yyyy", { locale: ptBR });
+                                
                                 return (
                                     <AccordionItem value={invoice.id} key={invoice.id} className="border-b border-gray-700">
                                         <AccordionTrigger className="hover:no-underline">
                                             <div className="flex justify-between w-full pr-4">
                                                 <span className="capitalize">{monthName}</span>
-                                                <span className={`font-bold ${invoice.openTotal > 0 ? 'text-red-500' : 'text-green-500'}`}>
+                                                <span className={`font-bold ${invoice.openTotal >= 0 ? 'text-red-500' : 'text-green-500'}`}>
                                                     {invoice.openTotal < 0 ? `Crédito de R$ ${Math.abs(invoice.openTotal).toFixed(2).replace('.', ',')}` : `R$ ${invoice.openTotal.toFixed(2).replace('.', ',')}`}
                                                 </span>
                                             </div>
                                         </AccordionTrigger>
-                                        <AccordionContent className="bg-gray-800/50">
+                                        <AccordionContent className="bg-gray-800/50 p-4">
+                                            <div className="mb-4 p-4 bg-gray-900/50 rounded-lg border border-gray-700">
+                                                <h3 className="font-bold text-lg mb-2 text-white">Resumo da Fatura</h3>
+                                                <div className="space-y-1 text-sm">
+                                                    <p className="flex justify-between">
+                                                        <span>Total consumido:</span>
+                                                        <span className="font-medium text-gray-300">R$ {invoiceTotal.toFixed(2).replace('.', ',')}</span>
+                                                    </p>
+                                                    <p className="flex justify-between">
+                                                        <span>Total pago:</span>
+                                                        <span className="font-medium text-green-500">R$ {paidAmount.toFixed(2).replace('.', ',')}</span>
+                                                    </p>
+                                                    <p className="flex justify-between border-t border-gray-600 pt-1 mt-1">
+                                                        <span>Restante:</span>
+                                                        <span className="font-bold text-red-500">R$ {invoice.openTotal.toFixed(2).replace('.', ',')}</span>
+                                                    </p>
+                                                </div>
+                                            </div>
+                                            
                                             {Object.keys(groupedByDate).length > 0 ? (
                                                 Object.entries(groupedByDate).map(([date, { total, items }]) => (
-                                                    <div key={date} className="pt-3 pb-4 px-4">
+                                                    <div key={date} className="pt-3 pb-4 px-4 border-t border-gray-700/50 first:border-t-0">
                                                         <p className="font-semibold text-sm mb-2 text-gray-300">{date} - Total: R$ {total.toFixed(2).replace('.', ',')}</p>
                                                         <ul className="list-disc pl-6 text-sm text-gray-400 space-y-1">
                                                             {items.map(item => <li key={item.id}>{item.product_name} (x{item.quantity}) - R$ {item.subtotal.toFixed(2).replace('.', ',')}</li>)}
