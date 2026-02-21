@@ -41,19 +41,24 @@ const DebtDetailModal: React.FC<DebtDetailModalProps> = ({ debtor, isOpen, onClo
                     collection(db, 'invoices'),
                     where('ownerId', '==', user.uid),
                     where('customerId', '==', debtor.customerId),
-                    where('openTotal', '>', 0),
                     orderBy('month', 'desc')
                 );
                 const invoicesSnapshot = await getDocs(invoicesQuery);
+                
+                // *** CORREÇÃO APLICADA AQUI: Mostrar TODAS as faturas (débitos e créditos) ***
                 const invoicesData = invoicesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Invoice));
                 setInvoices(invoicesData);
 
                 if (invoicesData.length > 0) {
                     const invoiceIds = invoicesData.map(inv => inv.id);
-                    const consumptionsQuery = query(collection(db, 'consumption_records'), where('ownerId', '==', user.uid), where('invoiceId', 'in', invoiceIds));
-                    const consumptionsSnapshot = await getDocs(consumptionsQuery);
-                    const consumptionsData = consumptionsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ConsumptionRecord));
-                    setConsumptions(consumptionsData);
+                    if (invoiceIds.length > 0) {
+                        const consumptionsQuery = query(collection(db, 'consumption_records'), where('ownerId', '==', user.uid), where('invoiceId', 'in', invoiceIds));
+                        const consumptionsSnapshot = await getDocs(consumptionsQuery);
+                        const consumptionsData = consumptionsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ConsumptionRecord));
+                        setConsumptions(consumptionsData);
+                    } else {
+                         setConsumptions([]);
+                    }
                 } else {
                     setConsumptions([]);
                 }
@@ -79,31 +84,28 @@ const DebtDetailModal: React.FC<DebtDetailModalProps> = ({ debtor, isOpen, onClo
         }
 
         let sanitizedPhone = debtor.customerPhone.replace(/\D/g, '');
-
-        if (sanitizedPhone.startsWith('55')) {
-            sanitizedPhone = sanitizedPhone.substring(2);
-        }
-
+        if (sanitizedPhone.startsWith('55')) { sanitizedPhone = sanitizedPhone.substring(2); }
         if (![10, 11].includes(sanitizedPhone.length)) {
             toast.error("Telefone inválido", { description: `O número "${debtor.customerPhone}" não parece ser um telefone brasileiro válido.` });
             return;
         }
-        
         const fullPhoneNumber = `55${sanitizedPhone}`;
         
-        // --- GERAÇÃO DA MENSAGEM DETALHADA ---
-        let message = `Olá, ${debtor.customerName}! Salve Deus. Segue o resumo completo das suas faturas em aberto na Cantina da Mãe Yara:
+        let message = `Olá, ${debtor.customerName}! Salve Deus. Segue o resumo completo das suas faturas na Cantina da Mãe Yara:\n\n`;
 
-`;
-
+        // Itera sobre as faturas (incluindo débitos e créditos)
         invoices.forEach(invoice => {
             const monthName = format(parse(invoice.month, 'yyyy-MM', new Date()), "MMMM/yyyy", { locale: ptBR });
-            const invoiceTotal = invoice.openTotal.toFixed(2).replace('.', ',');
+            const invoiceTotal = Math.abs(invoice.openTotal).toFixed(2).replace('.', ',');
             
-            message += `--- ${monthName} ---
-`;
-            message += `Total da Fatura: R$ ${invoiceTotal}
-`;
+            message += `--- ${monthName} ---\n`;
+            if (invoice.openTotal > 0) {
+                message += `Total da Fatura: R$ ${invoiceTotal}\n`;
+            } else if (invoice.openTotal < 0) {
+                message += `Crédito na Fatura: R$ ${invoiceTotal}\n`;
+            } else {
+                message += `Fatura Zerada: R$ 0,00\n`;
+            }
             
             const invoiceConsumptions = consumptionsByInvoice[invoice.id] || [];
             const groupedByDate = invoiceConsumptions.reduce((acc, con) => {
@@ -114,36 +116,23 @@ const DebtDetailModal: React.FC<DebtDetailModalProps> = ({ debtor, isOpen, onClo
                 return acc;
             }, {} as Record<string, { total: number, items: ConsumptionRecord[] }>);
 
-            const sortedDates = Object.keys(groupedByDate).sort((a, b) => {
-                const dateA = parse(a, 'dd/MM/yyyy', new Date());
-                const dateB = parse(b, 'dd/MM/yyyy', new Date());
-                return dateA.getTime() - dateB.getTime();
-            });
+            const sortedDates = Object.keys(groupedByDate).sort((a, b) => parse(a, 'dd/MM/yyyy', new Date()).getTime() - parse(b, 'dd/MM/yyyy', new Date()).getTime());
 
             sortedDates.forEach(date => {
                 const { total, items } = groupedByDate[date];
-                message += `  ${date}: R$ ${total.toFixed(2).replace('.', ',')}
-`;
-                
+                message += `  ${date}: R$ ${total.toFixed(2).replace('.', ',')}\n`;
                 items.forEach(item => {
                     const unitPrice = (item.subtotal / item.quantity).toFixed(2).replace('.', ',');
-                    const subtotal = item.subtotal.toFixed(2).replace('.', ',');
-                    message += `    - ${item.product_name} ${unitPrice} (x${item.quantity}): R$ ${subtotal}
-`;
+                    message += `    - ${item.product_name} ${unitPrice} (x${item.quantity}): R$ ${item.subtotal.toFixed(2).replace('.', ',')}\n`;
                 });
             });
             message += '\n';
         });
 
-        message += `DÍVIDA TOTAL: R$ ${debtor.totalDebt.toFixed(2).replace('.', ',')}
-
-`;
+        message += `DÍVIDA TOTAL: R$ ${debtor.totalDebt.toFixed(2).replace('.', ',')}\n\n`;
         message += "Para pagar, utilize o PIX: alamanto@hotmail.com.br";
         
-        const encodedMessage = encodeURIComponent(message);
-        const whatsappUrl = `https://wa.me/${fullPhoneNumber}?text=${encodedMessage}`;
-
-        window.open(whatsappUrl, '_blank', 'noopener,noreferrer');
+        window.open(`https://wa.me/${fullPhoneNumber}?text=${encodeURIComponent(message)}`, '_blank', 'noopener,noreferrer');
     };
 
     return (
@@ -159,11 +148,12 @@ const DebtDetailModal: React.FC<DebtDetailModalProps> = ({ debtor, isOpen, onClo
                 <div className="flex-grow overflow-y-auto pr-4 -mr-4">
                     {isLoading ? (
                         <div className="flex justify-center items-center h-48"><Loader2 className="h-8 w-8 animate-spin text-blue-400" /></div>
-                    ) : !invoices.length ? (
-                        <div className="text-center py-10"><p className="text-gray-400">Não há faturas compondo a dívida.</p></div>
+                    ) : invoices.length === 0 ? (
+                        <div className="text-center py-10"><p className="text-gray-400">Não há faturas para este cliente.</p></div>
                     ) : (
                         <Accordion type="single" collapsible className="w-full">
                             {invoices.map(invoice => {
+                                if (Math.abs(invoice.openTotal) < 0.01) return null; // Não mostra faturas zeradas
                                 const invoiceConsumptions = consumptionsByInvoice[invoice.id] || [];
                                 const groupedByDate = invoiceConsumptions.reduce((acc, con) => {
                                     const dateObj = con.date?.toDate ? con.date.toDate() : new Date();
@@ -176,18 +166,28 @@ const DebtDetailModal: React.FC<DebtDetailModalProps> = ({ debtor, isOpen, onClo
                                 return (
                                     <AccordionItem value={invoice.id} key={invoice.id} className="border-b border-gray-700">
                                         <AccordionTrigger className="hover:no-underline">
-                                            <div className="flex justify-between w-full pr-4"><span className="capitalize">{monthName}</span><span className="font-bold text-red-500">R$ {invoice.openTotal.toFixed(2).replace('.', ',')}</span></div>
+                                            <div className="flex justify-between w-full pr-4">
+                                                <span className="capitalize">{monthName}</span>
+                                                <span className={`font-bold ${invoice.openTotal > 0 ? 'text-red-500' : 'text-green-500'}`}>
+                                                    {invoice.openTotal < 0 ? `Crédito de R$ ${Math.abs(invoice.openTotal).toFixed(2).replace('.', ',')}` : `R$ ${invoice.openTotal.toFixed(2).replace('.', ',')}`}
+                                                </span>
+                                            </div>
                                         </AccordionTrigger>
                                         <AccordionContent className="bg-gray-800/50">
-                                            {Object.entries(groupedByDate).map(([date, { total, items }]) => (
-                                                <div key={date} className="pt-3 pb-4 px-4">
-                                                    <p className="font-semibold text-sm mb-2 text-gray-300">{date} - Total: R$ {total.toFixed(2).replace('.', ',')}</p>
-                                                    <ul className="list-disc pl-6 text-sm text-gray-400 space-y-1">
-                                                        {items.map(item => <li key={item.id}>{item.product_name} (x{item.quantity}) - R$ {item.subtotal.toFixed(2).replace('.', ',')}</li>)}
-                                                    </ul>
-                                                </div>
-                                            ))}
-                                            {invoiceConsumptions.length === 0 && <p className="text-sm text-gray-400 p-4">Não há detalhes de consumo para esta fatura.</p>}
+                                            {Object.keys(groupedByDate).length > 0 ? (
+                                                Object.entries(groupedByDate).map(([date, { total, items }]) => (
+                                                    <div key={date} className="pt-3 pb-4 px-4">
+                                                        <p className="font-semibold text-sm mb-2 text-gray-300">{date} - Total: R$ {total.toFixed(2).replace('.', ',')}</p>
+                                                        <ul className="list-disc pl-6 text-sm text-gray-400 space-y-1">
+                                                            {items.map(item => <li key={item.id}>{item.product_name} (x{item.quantity}) - R$ {item.subtotal.toFixed(2).replace('.', ',')}</li>)}
+                                                        </ul>
+                                                    </div>
+                                                ))
+                                            ) : (
+                                                <p className="text-sm text-gray-400 p-4">
+                                                    {invoice.openTotal < 0 ? "Este é um crédito de pagamentos anteriores." : "Não há detalhes de consumo para esta fatura."}
+                                                </p>
+                                            )}
                                         </AccordionContent>
                                     </AccordionItem>
                                 );
@@ -196,13 +196,12 @@ const DebtDetailModal: React.FC<DebtDetailModalProps> = ({ debtor, isOpen, onClo
                     )}
                 </div>
                 <div className="pt-4 border-t border-gray-700">
-                    <Button onClick={handleWhatsAppClick} className="w-full bg-green-600 hover:bg-green-700 text-white" disabled={isLoading || !invoices.length}><Smartphone className="mr-2 h-4 w-4" /> Enviar Resumo por WhatsApp</Button>
+                    <Button onClick={handleWhatsAppClick} className="w-full bg-green-600 hover:bg-green-700 text-white" disabled={isLoading || invoices.length === 0}><Smartphone className="mr-2 h-4 w-4" /> Enviar Resumo por WhatsApp</Button>
                 </div>
             </DialogContent>
         </Dialog>
     );
 };
-
 
 const BillingPage: React.FC = () => {
     const { user, loading: authLoading } = useAuth();
@@ -222,7 +221,6 @@ const BillingPage: React.FC = () => {
                 const invoicesSnapshot = await getDocs(invoicesQuery);
                 const allInvoices = invoicesSnapshot.docs.map(doc => doc.data() as Invoice);
                 
-                // FIXED: Filter out invoices with missing customerId
                 const customerIds = [...new Set(allInvoices.map(inv => inv.customerId).filter(id => id))] as string[];
 
                 if (customerIds.length === 0) {
@@ -248,7 +246,6 @@ const BillingPage: React.FC = () => {
                 for (let i = 0; i < debtorIds.length; i += 30) { chunks.push(debtorIds.slice(i, i + 30)); }
 
                 for (const chunk of chunks) {
-                    // This query will now only receive valid customer IDs
                     const customersQuery = query(collection(db, "customers"), where(documentId(), "in", chunk));
                     const customerSnapshots = await getDocs(customersQuery);
                     customerSnapshots.forEach(doc => { customersData[doc.id] = { id: doc.id, ...doc.data() } as Customer; });
