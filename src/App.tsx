@@ -8,23 +8,22 @@ import AdminRoute from "@/components/AdminRoute";
 import AppLayout from "@/components/AppLayout";
 import { Loader2 } from "lucide-react";
 
-// 1. IMPORTAR A NOVA PÁGINA
-import { 
-  Admin, 
-  Auth as LoginPage, 
-  Billing, 
-  BillingReport, 
-  Consumption, 
-  Customers, 
-  Dashboard, 
-  DailyReport, // <-- ADICIONADO
-  NotFound, 
-  Payments, 
-  PaymentHistory,
-  Products,
-  PendingApproval,
-  Reports
-} from "@/pages";
+// Import pages directly to avoid circular dependencies
+import Admin from "@/pages/Admin";
+import LoginPage from "@/pages/Auth";
+import Billing from "@/pages/Billing";
+import BillingReport from "@/pages/BillingReport";
+import Consumption from "@/pages/Consumption";
+import Customers from "@/pages/Customers";
+import Dashboard from "@/pages/Dashboard";
+import DailyReport from "@/pages/DailyReport";
+import NotFound from "@/pages/NotFound";
+import Payments from "@/pages/Payments";
+import PaymentHistory from "@/pages/PaymentHistory";
+import Products from "@/pages/Products";
+import PendingApproval from "@/pages/PendingApproval";
+import Reports from "@/pages/Reports";
+
 
 const LayoutWrapper = () => {
   const { isAdmin } = useAuth();
@@ -76,13 +75,12 @@ function App() {
               <Route path="payment-history" element={<PaymentHistory />} />
               <Route path="products" element={<Products />} />
               <Route path="customers" element={<Customers />} />
+              <Route path="billing" element={<Billing />} />
               
               <Route element={<AdminRoute />}>
                 <Route path="admin" element={<Admin />} />
-                <Route path="billing" element={<Billing />} />
                 <Route path="billing-report" element={<BillingReport />} />
-                {/* 2. ADICIONAR A NOVA ROTA */}
-                <Route path="daily-report" element={<DailyReport />} /> {/* <-- ADICIONADO */}
+                <Route path="daily-report" element={<DailyReport />} />
                 <Route path="reports" element={<Reports />} />
               </Route>
             </Route>

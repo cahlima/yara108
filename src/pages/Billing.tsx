@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { collection, query, where, getDocs, documentId, orderBy } from 'firebase/firestore';
+import { collection, query, where, getDocs, documentId, orderBy, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/hooks/useAuth';
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
@@ -15,8 +15,8 @@ import { getCustomerDebt } from '@/lib/debt';
 // Interfaces
 interface Customer { id: string; name: string; phone?: string; }
 interface Debtor { customerId: string; customerName: string; customerPhone?: string; totalDebt: number; }
-interface Invoice { id: string; month: string; openTotal: number; status: 'OPEN' | 'PARTIAL' | 'PAID'; }
-interface ConsumptionRecord { id: string; date: string; product_name: string; quantity: number; subtotal: number; invoiceId: string; }
+interface Invoice { id: string; month: string; openTotal: number; status: 'OPEN' | 'PARTIAL' | 'PAID'; customerId?: string; }
+interface ConsumptionRecord { id: string; date: Timestamp; product_name: string; quantity: number; subtotal: number; invoiceId: string; }
 
 // --- COMPONENTE DO MODAL ---
 
@@ -107,7 +107,8 @@ const DebtDetailModal: React.FC<DebtDetailModalProps> = ({ debtor, isOpen, onClo
             
             const invoiceConsumptions = consumptionsByInvoice[invoice.id] || [];
             const groupedByDate = invoiceConsumptions.reduce((acc, con) => {
-                const formattedDate = format(parse(con.date, 'yyyy-MM-dd', new Date()), "dd/MM/yyyy");
+                const dateObj = con.date?.toDate ? con.date.toDate() : new Date();
+                const formattedDate = format(dateObj, "dd/MM/yyyy");
                 (acc[formattedDate] = acc[formattedDate] || { total: 0, items: [] }).items.push(con);
                 acc[formattedDate].total += con.subtotal;
                 return acc;
@@ -149,9 +150,9 @@ const DebtDetailModal: React.FC<DebtDetailModalProps> = ({ debtor, isOpen, onClo
         <Dialog open={isOpen} onOpenChange={onClose}>
             <DialogContent className="max-w-md md:max-w-lg lg:max-w-2xl max-h-[90vh] flex flex-col bg-gray-900 text-white border-gray-700">
                 <DialogHeader>
-                    <DialogTitle>Detalhes da Dívida - {debtor?.customerName}</DialogTitle>
+                    <DialogTitle>{debtor ? `Detalhes da Dívida - ${debtor.customerName}`: 'Carregando...'}</DialogTitle>
                     <DialogDescription>
-                        Resumo da dívida de R$ {debtor?.totalDebt.toFixed(2).replace('.', ',')}.
+                        {debtor ? `Resumo da dívida de R$ ${debtor.totalDebt.toFixed(2).replace('.', ',')}.`: 'Aguarde enquanto os detalhes são carregados.'}
                     </DialogDescription>
                     <DialogClose asChild><button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-white"><X size={24} /></button></DialogClose>
                 </DialogHeader>
@@ -165,7 +166,8 @@ const DebtDetailModal: React.FC<DebtDetailModalProps> = ({ debtor, isOpen, onClo
                             {invoices.map(invoice => {
                                 const invoiceConsumptions = consumptionsByInvoice[invoice.id] || [];
                                 const groupedByDate = invoiceConsumptions.reduce((acc, con) => {
-                                    const formattedDate = format(parse(con.date, 'yyyy-MM-dd', new Date()), "dd/MM/yyyy");
+                                    const dateObj = con.date?.toDate ? con.date.toDate() : new Date();
+                                    const formattedDate = format(dateObj, "dd/MM/yyyy", { locale: ptBR });
                                     (acc[formattedDate] = acc[formattedDate] || { total: 0, items: [] }).items.push(con);
                                     acc[formattedDate].total += con.subtotal;
                                     return acc;
@@ -218,8 +220,10 @@ const BillingPage: React.FC = () => {
             try {
                 const invoicesQuery = query(collection(db, 'invoices'), where('ownerId', '==', user.uid), where('status', 'in', ['OPEN', 'PARTIAL']));
                 const invoicesSnapshot = await getDocs(invoicesQuery);
-                const allInvoices = invoicesSnapshot.docs.map(doc => doc.data());
-                const customerIds = [...new Set(allInvoices.map(inv => inv.customerId as string))];
+                const allInvoices = invoicesSnapshot.docs.map(doc => doc.data() as Invoice);
+                
+                // FIXED: Filter out invoices with missing customerId
+                const customerIds = [...new Set(allInvoices.map(inv => inv.customerId).filter(id => id))] as string[];
 
                 if (customerIds.length === 0) {
                     setDebtors([]); setLoading(false); return;
@@ -230,7 +234,7 @@ const BillingPage: React.FC = () => {
                     return { customerId: id, totalDebt };
                 });
 
-                const debts = await Promise.all(debtorPromises);
+                const debts = await Promise.all( debtorPromises);
                 const debtorsWithDebt = debts.filter(d => d.totalDebt > 0.01);
                 const debtorIds = debtorsWithDebt.map(d => d.customerId);
                 const debtMap = new Map(debtorsWithDebt.map(d => [d.customerId, d.totalDebt]));
@@ -244,6 +248,7 @@ const BillingPage: React.FC = () => {
                 for (let i = 0; i < debtorIds.length; i += 30) { chunks.push(debtorIds.slice(i, i + 30)); }
 
                 for (const chunk of chunks) {
+                    // This query will now only receive valid customer IDs
                     const customersQuery = query(collection(db, "customers"), where(documentId(), "in", chunk));
                     const customerSnapshots = await getDocs(customersQuery);
                     customerSnapshots.forEach(doc => { customersData[doc.id] = { id: doc.id, ...doc.data() } as Customer; });
