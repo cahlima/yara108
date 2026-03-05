@@ -1,10 +1,8 @@
+import admin from "firebase-admin";
+import { createRequire } from "node:module";
 
-import * as admin from 'firebase-admin';
-
-// Use a variável de ambiente para as credenciais em produção
-// Para desenvolvimento local, o SDK pode buscar automaticamente se GOOGLE_APPLICATION_CREDENTIALS estiver setado
-// ou se você inicializar com o serviceAccount.
-const serviceAccount = require('../../secrets/serviceAccountKey.json');
+const require = createRequire(import.meta.url);
+const serviceAccount = require("../secrets/serviceAccountKey.json");
 
 if (!admin.apps.length) {
   admin.initializeApp({
