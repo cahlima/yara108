@@ -240,7 +240,6 @@ const Consumption = () => {
 
   useEffect(() => {
     if (selectedProduct && !dayProducts.some((p) => p.id === selectedProduct)) {
-      setProductOpen(false); // 🔑 FECHA O SELECT PRIMEIRO
       setSelectedProduct("");
     }
   }, [dayProducts, selectedProduct]);
@@ -563,7 +562,17 @@ const Consumption = () => {
               <Select value={selectedProductToAdd} onValueChange={setSelectedProductToAdd}>
                 <SelectTrigger><SelectValue placeholder="Adicionar produto..." /></SelectTrigger>
                 <SelectContent>
-                  {availableProducts.length > 0 ? ( availableProducts.map((p) => (<SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>))) : (<p className="p-4 text-sm text-center text-muted-foreground">Todos os produtos já foram adicionados.</p>)}
+                  {availableProducts.length > 0 ? (
+                    availableProducts.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.name}
+                      </SelectItem>
+                    ))
+                  ) : (
+                    <SelectItem value="__empty__" disabled>
+                      Todos os produtos já foram adicionados.
+                    </SelectItem>
+                  )}
                 </SelectContent>
               </Select>
               <Button onClick={() => addProductToDay(selectedProductToAdd)} disabled={!selectedProductToAdd}><PlusCircle className="h-4 w-4" /></Button>

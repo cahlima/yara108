@@ -1,23 +1,21 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { collection, query, where, getDocs, documentId, orderBy, Timestamp } from 'firebase/firestore';
+import { collection, query, where, getDocs, documentId, orderBy } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/hooks/useAuth';
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogClose } from "@/components/ui/dialog";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
-import { Loader2, CheckCircle, Smartphone, Info, X } from 'lucide-react';
+import { Loader2, CheckCircle, Smartphone, Info, X, DollarSign } from 'lucide-react';
 import { toast } from "sonner";
 import { format, parse } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { getCustomerDebt } from '@/lib/debt';
+import { formatCurrency } from '@/lib/utils';
 
 // Interfaces
 interface Customer { id: string; name: string; phone?: string; }
 interface Debtor { customerId: string; customerName: string; customerPhone?: string; totalDebt: number; }
-interface Invoice { id: string; month: string; openTotal: number; status: 'OPEN' | 'PARTIAL' | 'PAID'; customerId?: string; payments?: Payment[]; }
-interface ConsumptionRecord { id: string; date: Timestamp; product_name: string; quantity: number; subtotal: number; invoiceId: string; }
-interface Payment { id: string; amount: number; invoiceId: string; }
+interface Invoice { id: string; month: string; openTotal: number; status: 'open' | 'partial' | 'paid' | 'canceled'; customerId?: string; customerName?: string; }
 
 // --- COMPONENTE DO MODAL ---
 
@@ -25,13 +23,11 @@ interface DebtDetailModalProps {
     debtor: Debtor | null;
     isOpen: boolean;
     onClose: () => void;
-    user: any;
+    user: { uid: string };
 }
 
 const DebtDetailModal: React.FC<DebtDetailModalProps> = ({ debtor, isOpen, onClose, user }) => {
     const [invoices, setInvoices] = useState<Invoice[]>([]);
-    const [consumptions, setConsumptions] = useState<ConsumptionRecord[]>([]);
-    const [payments, setPayments] = useState<Payment[]>([]);
     const [isLoading, setIsLoading] = useState(false);
 
     useEffect(() => {
@@ -43,48 +39,18 @@ const DebtDetailModal: React.FC<DebtDetailModalProps> = ({ debtor, isOpen, onClo
                     collection(db, 'invoices'),
                     where('ownerId', '==', user.uid),
                     where('customerId', '==', debtor.customerId),
+                    where('openTotal', '>', 0),
+                    where('status', '!=', 'canceled'),
                     orderBy('month', 'desc')
                 );
                 const invoicesSnapshot = await getDocs(invoicesQuery);
                 
-                const invoicesData = invoicesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Invoice));
+                const invoicesData = invoicesSnapshot.docs
+                    .map(doc => ({ id: doc.id, ...doc.data() } as Invoice))
+                    .filter(inv => inv.openTotal > 0.01); // Segurança extra
+
                 setInvoices(invoicesData);
 
-                if (invoicesData.length > 0) {
-                    const invoiceIds = invoicesData
-                        .map(inv => inv.id)
-                        .filter(id => !!id);
-
-                    if (invoiceIds.length > 0) {
-                        const consumptionsQuery = query(collection(db, 'consumption_records'), where('ownerId', '==', user.uid), where('invoiceId', 'in', invoiceIds));
-                        const paymentsQuery = query(collection(db, 'payments'), where('ownerId', '==', user.uid), where('invoiceId', 'in', invoiceIds));
-
-                        const [consumptionsSnapshot, paymentsSnapshot] = await Promise.all([
-                            getDocs(consumptionsQuery),
-                            getDocs(paymentsQuery)
-                        ]);
-
-                        const consumptionsData = consumptionsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ConsumptionRecord));
-                        
-                        const paymentsData = paymentsSnapshot.docs
-                            .map(doc => ({ id: doc.id, ...doc.data() } as Payment))
-                            .filter(p => invoiceIds.includes(p.invoiceId));
-
-                        console.log("DEBUG PAGAMENTOS", {
-                            invoiceIds,
-                            paymentsData
-                        });
-
-                        setConsumptions(consumptionsData);
-                        setPayments(paymentsData);
-                    } else {
-                         setConsumptions([]);
-                         setPayments([]);
-                    }
-                } else {
-                    setConsumptions([]);
-                    setPayments([]);
-                }
             } catch (err) {
                 console.error("Erro ao buscar detalhes da dívida:", err);
                 toast.error("Não foi possível carregar os detalhes da dívida.");
@@ -95,80 +61,41 @@ const DebtDetailModal: React.FC<DebtDetailModalProps> = ({ debtor, isOpen, onClo
         fetchDetails();
     }, [isOpen, debtor, user]);
 
-    const consumptionsByInvoice = useMemo(() => consumptions.reduce((acc, con) => {
-        (acc[con.invoiceId] = acc[con.invoiceId] || []).push(con);
-        return acc;
-    }, {} as Record<string, ConsumptionRecord[]>), [consumptions]);
-
-    const paymentsByInvoice = useMemo(() => payments.reduce((acc, p) => {
-        (acc[p.invoiceId] = acc[p.invoiceId] || []).push(p);
-        return acc;
-    }, {} as Record<string, Payment[]>), [payments]);
-
     const handleWhatsAppClick = () => {
         if (!debtor?.customerPhone) {
             toast.error("Telefone não cadastrado", { description: "Este cliente não possui um número de telefone para contato." });
             return;
         }
 
-        let sanitizedPhone = debtor.customerPhone.replace(/\D/g, '');
-        if (sanitizedPhone.startsWith('55')) { sanitizedPhone = sanitizedPhone.substring(2); }
-        if (![10, 11].includes(sanitizedPhone.length)) {
+        const sanitizedPhone = debtor.customerPhone.replace(/\D/g, '');
+        if (sanitizedPhone.length < 10 || sanitizedPhone.length > 11) {
             toast.error("Telefone inválido", { description: `O número "${debtor.customerPhone}" não parece ser um telefone brasileiro válido.` });
             return;
         }
         const fullPhoneNumber = `55${sanitizedPhone}`;
         
-        let message = `Olá, ${debtor.customerName}! Salve Deus. Segue o resumo completo das suas faturas na Cantina da Mãe Yara:\n\n`;
+        let message = `Olá, ${debtor.customerName}! Salve Deus.\nSegue o resumo das suas faturas em aberto na Cantina da Mãe Yara:\n\n`;
 
         invoices.forEach(invoice => {
             const monthName = format(parse(invoice.month, 'yyyy-MM', new Date()), "MMMM/yyyy", { locale: ptBR });
-            const invoiceConsumptions = consumptionsByInvoice[invoice.id] || [];
-            const invoicePayments = paymentsByInvoice[invoice.id] || [];
-            
-            const invoiceTotal = invoiceConsumptions.reduce((sum, item) => sum + item.subtotal, 0);
-            const paidAmount = invoicePayments.reduce((sum, p) => sum + p.amount, 0);
-            const recalculatedOpenTotal = invoiceTotal - paidAmount;
-
-            message += `--- ${monthName} ---\n`;
-            message += `Total consumido: R$ ${invoiceTotal.toFixed(2).replace('.', ',')}\n`;
-            message += `Total pago: R$ ${paidAmount.toFixed(2).replace('.', ',')}\n`;
-            message += `Restante: R$ ${recalculatedOpenTotal.toFixed(2).replace('.', ',')}\n\n`;
-            
-            const groupedByDate = invoiceConsumptions.reduce((acc, con) => {
-                const dateObj = con.date?.toDate ? con.date.toDate() : new Date();
-                const formattedDate = format(dateObj, "dd/MM/yyyy");
-                (acc[formattedDate] = acc[formattedDate] || { total: 0, items: [] }).items.push(con);
-                acc[formattedDate].total += con.subtotal;
-                return acc;
-            }, {} as Record<string, { total: number, items: ConsumptionRecord[] }>);
-
-            const sortedDates = Object.keys(groupedByDate).sort((a, b) => parse(a, 'dd/MM/yyyy', new Date()).getTime() - parse(b, 'dd/MM/yyyy', new Date()).getTime());
-
-            sortedDates.forEach(date => {
-                const { total, items } = groupedByDate[date];
-                message += `  ${date}: R$ ${total.toFixed(2).replace('.', ',')}\n`;
-                items.forEach(item => {
-                    const unitPrice = (item.subtotal / item.quantity).toFixed(2).replace('.', ',');
-                    message += `    - ${item.product_name} ${unitPrice} (x${item.quantity}): R$ ${item.subtotal.toFixed(2).replace('.', ',')}\n`;
-                });
-            });
-            message += '\n';
+            const openTotalFormatted = formatCurrency(invoice.openTotal);
+            message += `- ${monthName}: ${openTotalFormatted}\n`;
         });
 
-        message += `DÍVIDA TOTAL: R$ ${debtor.totalDebt.toFixed(2).replace('.', ',')}\n\n`;
-        message += "Para pagar, utilize o PIX: alamanto@hotmail.com.br";
-        
+        const totalDebtFormatted = formatCurrency(debtor.totalDebt);
+        message += `\n*TOTAL DA DÍVIDA: ${totalDebtFormatted}*\n\n`;
+        message += "Para pagar, por favor, utilize o PIX da Cantina: alamanto@hotmail.com.br\n\nQualquer dúvida, estou à disposição!";
+
         window.open(`https://wa.me/${fullPhoneNumber}?text=${encodeURIComponent(message)}`, '_blank', 'noopener,noreferrer');
     };
 
     return (
         <Dialog open={isOpen} onOpenChange={onClose}>
-            <DialogContent className="max-w-md md:max-w-lg lg:max-w-2xl max-h-[90vh] flex flex-col bg-gray-900 text-white border-gray-700">
+            <DialogContent className="max-w-md md:max-w-lg max-h-[80vh] flex flex-col bg-gray-900 text-white border-gray-700">
                 <DialogHeader>
                     <DialogTitle>{debtor ? `Detalhes da Dívida - ${debtor.customerName}`: 'Carregando...'}</DialogTitle>
                     <DialogDescription>
-                        {debtor ? `Resumo da dívida de R$ ${debtor.totalDebt.toFixed(2).replace('.', ',')}.`: 'Aguarde enquanto os detalhes são carregados.'}
+                        {debtor ? `Resumo da dívida de ${formatCurrency(debtor.totalDebt)}.` : 'Aguarde enquanto os detalhes são carregados.'}
                     </DialogDescription>
                     <DialogClose asChild><button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-white"><X size={24} /></button></DialogClose>
                 </DialogHeader>
@@ -178,88 +105,23 @@ const DebtDetailModal: React.FC<DebtDetailModalProps> = ({ debtor, isOpen, onClo
                     ) : invoices.length === 0 ? (
                         <div className="text-center py-10"><p className="text-gray-400">Não há faturas para este cliente.</p></div>
                     ) : (
-                        <Accordion type="single" collapsible className="w-full">
+                        <div className="space-y-2">
                             {invoices.map(invoice => {
-                                const invoiceConsumptions = consumptionsByInvoice[invoice.id] || [];
-                                const invoicePayments = paymentsByInvoice[invoice.id] || [];
-                                
-                                const invoiceTotal = invoiceConsumptions.reduce((sum, item) => sum + item.subtotal, 0);
-                                const paidAmount = invoicePayments.reduce((sum, p) => sum + p.amount, 0);
-                                const recalculatedOpenTotal = invoiceTotal - paidAmount;
-
-                                if (recalculatedOpenTotal < -0.01) { // Floating point tolerance
-                                    console.error('Erro: openTotal negativo recalculado', {
-                                        invoiceId: invoice.id,
-                                        invoiceTotal,
-                                        paidAmount,
-                                        recalculatedOpenTotal
-                                    });
-                                }
-
-                                // Só ignora faturas completamente vazias
-                                if (invoiceTotal === 0 && paidAmount === 0) return null;
-
-                                const groupedByDate = invoiceConsumptions.reduce((acc, con) => {
-                                    const dateObj = con.date?.toDate ? con.date.toDate() : new Date();
-                                    const formattedDate = format(dateObj, "dd/MM/yyyy", { locale: ptBR });
-                                    (acc[formattedDate] = acc[formattedDate] || { total: 0, items: [] }).items.push(con);
-                                    acc[formattedDate].total += con.subtotal;
-                                    return acc;
-                                }, {} as Record<string, { total: number, items: ConsumptionRecord[] }>);
                                 const monthName = format(parse(invoice.month, 'yyyy-MM', new Date()), "MMMM/yyyy", { locale: ptBR });
-                                
                                 return (
-                                    <AccordionItem value={invoice.id} key={invoice.id} className="border-b border-gray-700">
-                                        <AccordionTrigger className="hover:no-underline">
-                                            <div className="flex justify-between w-full pr-4">
-                                                <span className="capitalize">{monthName}</span>
-                                                <span className={`font-bold ${recalculatedOpenTotal > 0 ? 'text-red-500' : 'text-green-500'}`}>
-                                                    {recalculatedOpenTotal < 0 ? `Crédito de R$ ${Math.abs(recalculatedOpenTotal).toFixed(2).replace('.', ',')}` : `R$ ${recalculatedOpenTotal.toFixed(2).replace('.', ',')}`}
-                                                </span>
-                                            </div>
-                                        </AccordionTrigger>
-                                        <AccordionContent className="bg-gray-800/50 p-4">
-                                            <div className="mb-4 p-4 bg-gray-900/50 rounded-lg border border-gray-700">
-                                                <h3 className="font-bold text-lg mb-2 text-white">Resumo da Fatura</h3>
-                                                <div className="space-y-1 text-sm">
-                                                    <p className="flex justify-between">
-                                                        <span>Total consumido:</span>
-                                                        <span className="font-medium text-gray-300">R$ {invoiceTotal.toFixed(2).replace('.', ',')}</span>
-                                                    </p>
-                                                    <p className="flex justify-between">
-                                                        <span>Total pago:</span>
-                                                        <span className="font-medium text-green-500">R$ {paidAmount.toFixed(2).replace('.', ',')}</span>
-                                                    </p>
-                                                    <p className="flex justify-between border-t border-gray-600 pt-1 mt-1">
-                                                        <span>Restante:</span>
-                                                        <span className="font-bold text-red-500">R$ {recalculatedOpenTotal.toFixed(2).replace('.', ',')}</span>
-                                                    </p>
-                                                </div>
-                                            </div>
-                                            
-                                            {Object.keys(groupedByDate).length > 0 ? (
-                                                Object.entries(groupedByDate).map(([date, { total, items }]) => (
-                                                    <div key={date} className="pt-3 pb-4 px-4 border-t border-gray-700/50 first:border-t-0">
-                                                        <p className="font-semibold text-sm mb-2 text-gray-300">{date} - Total: R$ {total.toFixed(2).replace('.', ',')}</p>
-                                                        <ul className="list-disc pl-6 text-sm text-gray-400 space-y-1">
-                                                            {items.map(item => <li key={item.id}>{item.product_name} (x{item.quantity}) - R$ {item.subtotal.toFixed(2).replace('.', ',')}</li>)}
-                                                        </ul>
-                                                    </div>
-                                                ))
-                                            ) : (
-                                                <p className="text-sm text-gray-400 p-4">
-                                                    {recalculatedOpenTotal < 0 ? "Este é um crédito de pagamentos anteriores." : "Não há detalhes de consumo para esta fatura."}
-                                                </p>
-                                            )}
-                                        </AccordionContent>
-                                    </AccordionItem>
+                                    <div key={invoice.id} className="flex justify-between items-center p-3 bg-gray-800 rounded-md border border-gray-700">
+                                        <span className="capitalize text-gray-300">{monthName}</span>
+                                        <span className="font-bold text-red-400">{formatCurrency(invoice.openTotal)}</span>
+                                    </div>
                                 );
                             })}
-                        </Accordion>
+                        </div>
                     )}
                 </div>
                 <div className="pt-4 border-t border-gray-700">
-                    <Button onClick={handleWhatsAppClick} className="w-full bg-green-600 hover:bg-green-700 text-white" disabled={isLoading || invoices.length === 0}><Smartphone className="mr-2 h-4 w-4" /> Enviar Resumo por WhatsApp</Button>
+                    <Button onClick={handleWhatsAppClick} className="w-full bg-green-600 hover:bg-green-700 text-white" disabled={isLoading || invoices.length === 0 || !debtor?.customerPhone}>
+                        <Smartphone className="mr-2 h-4 w-4" /> Enviar Resumo por WhatsApp
+                    </Button>
                 </div>
             </DialogContent>
         </Dialog>
@@ -267,7 +129,7 @@ const DebtDetailModal: React.FC<DebtDetailModalProps> = ({ debtor, isOpen, onClo
 };
 
 const BillingPage: React.FC = () => {
-    const { user, loading: authLoading } = useAuth();
+    const { user, loading: authLoading } = useAuth() as { user: { uid: string } | null, loading: boolean };
     const [debtors, setDebtors] = useState<Debtor[]>([]);
     const [loading, setLoading] = useState<boolean>(true);
     const [error, setError] = useState<string | null>(null);
@@ -279,46 +141,50 @@ const BillingPage: React.FC = () => {
             if (!user) { setLoading(false); return; }
             setLoading(true);
             setError(null);
+
             try {
-                const invoicesQuery = query(collection(db, 'invoices'), where('ownerId', '==', user.uid));
-                const invoicesSnapshot = await getDocs(invoicesQuery);
-                const allInvoices = invoicesSnapshot.docs.map(doc => doc.data() as Invoice);
-                
-                const customerIds = [...new Set(allInvoices.map(inv => inv.customerId).filter(id => id))] as string[];
+                const q = query(
+                    collection(db, "invoices"),
+                    where("ownerId", "==", user.uid),
+                    where("status", "!=", "canceled"),
+                    where("openTotal", ">", 0)
+                );
 
-                if (customerIds.length === 0) {
-                    setDebtors([]); setLoading(false); return;
-                }
+                const querySnapshot = await getDocs(q);
 
-                const debtorPromises = customerIds.map(async (id) => {
-                    const totalDebt = await getCustomerDebt(user.uid, id);
-                    return { customerId: id, totalDebt };
+                const debtByCustomer: Record<string, { totalDebt: number; customerName: string, customerId: string }> = {};
+
+                querySnapshot.forEach((doc) => {
+                    const invoice = doc.data() as Invoice;
+                    const customerId = invoice.customerId;
+                    if (!customerId) return;
+
+                    if (!debtByCustomer[customerId]) {
+                        debtByCustomer[customerId] = { totalDebt: 0, customerName: invoice.customerName || 'Cliente sem nome', customerId };
+                    }
+                    debtByCustomer[customerId].totalDebt += invoice.openTotal;
                 });
 
-                const debts = await Promise.all( debtorPromises);
-                const debtorsWithDebt = debts.filter(d => d.totalDebt > 0.01);
-                const debtorIds = debtorsWithDebt.map(d => d.customerId);
-                const debtMap = new Map(debtorsWithDebt.map(d => [d.customerId, d.totalDebt]));
-
-                if (debtorIds.length === 0) {
-                    setDebtors([]); setLoading(false); return;
-                }
-
+                const customerIdsWithDebt = Object.keys(debtByCustomer);
                 const customersData: Record<string, Customer> = {};
                 const chunks: string[][] = [];
-                for (let i = 0; i < debtorIds.length; i += 30) { chunks.push(debtorIds.slice(i, i + 30)); }
-
-                for (const chunk of chunks) {
-                    const customersQuery = query(collection(db, "customers"), where(documentId(), "in", chunk));
-                    const customerSnapshots = await getDocs(customersQuery);
-                    customerSnapshots.forEach(doc => { customersData[doc.id] = { id: doc.id, ...doc.data() } as Customer; });
+                for (let i = 0; i < customerIdsWithDebt.length; i += 30) {
+                    chunks.push(customerIdsWithDebt.slice(i, i + 30));
                 }
 
-                const finalDebtors: Debtor[] = debtorIds.map(id => ({
-                    customerId: id,
-                    customerName: customersData[id]?.name || 'Cliente Desconhecido',
-                    customerPhone: customersData[id]?.phone,
-                    totalDebt: debtMap.get(id) || 0,
+                for (const chunk of chunks) {
+                    if (chunk.length > 0) {
+                        const customersQuery = query(collection(db, "customers"), where(documentId(), "in", chunk));
+                        const customerSnapshots = await getDocs(customersQuery);
+                        customerSnapshots.forEach(doc => { customersData[doc.id] = { id: doc.id, ...doc.data() } as Customer; });
+                    }
+                }
+
+                const finalDebtors: Debtor[] = Object.values(debtByCustomer)
+                    .map(debtor => ({
+                        ...debtor,
+                        customerName: customersData[debtor.customerId]?.name || debtor.customerName,
+                        customerPhone: customersData[debtor.customerId]?.phone,
                 })).sort((a, b) => b.totalDebt - a.totalDebt);
 
                 setDebtors(finalDebtors);
@@ -333,14 +199,14 @@ const BillingPage: React.FC = () => {
     }, [user, authLoading]);
 
     const handleOpenModal = (debtor: Debtor) => { setSelectedDebtor(debtor); setIsModalOpen(true); };
-    const handleCloseModal = () => { setIsModalOpen(false); setSelectedDebtor(null); };
+    const handleCloseModal = () => { setIsModalOpen(false); }; // setSelectedDebtor(null) é tratado no onOpenChange
 
     if (authLoading || loading) return <div className="flex justify-center items-center h-64"><Loader2 className="h-12 w-12 animate-spin text-primary" /></div>;
     if (error) return <div className="bg-red-900 border border-red-700 text-red-100 p-4 m-4 rounded-md"><strong>Erro:</strong> {error}</div>;
 
     return (
         <>
-            <div className="container mx-auto p-4 space-y-6">
+            <div className="container mx-auto p-4 md:p-6 space-y-6">
                 <div className="text-white">
                     <h1 className="text-3xl font-bold">Débitos em Aberto</h1>
                     <p className="text-gray-400">Clientes com pagamentos pendentes. Total de {debtors.length} devedores.</p>
@@ -359,9 +225,12 @@ const BillingPage: React.FC = () => {
                         {debtors.map(debtor => (
                             <Card key={debtor.customerId} className="flex flex-col shadow-lg hover:shadow-xl transition-shadow bg-gray-900 border-gray-700 text-white">
                                 <CardHeader><CardTitle className="truncate">{debtor.customerName}</CardTitle></CardHeader>
-                                <CardContent className="flex-grow">
-                                    <p className="text-sm text-gray-400">Dívida Total</p>
-                                    <p className="text-3xl font-bold text-red-500">R$ {debtor.totalDebt.toFixed(2).replace('.', ',')}</p>
+                                <CardContent className="flex-grow flex flex-col justify-center items-center text-center">
+                                     <div className="flex items-center gap-2">
+                                        <DollarSign className="h-7 w-7 text-red-500" />
+                                        <p className="text-4xl font-bold text-red-500">{formatCurrency(debtor.totalDebt)}</p>
+                                    </div>
+                                    <p className="text-sm text-gray-400 mt-1">Dívida Total</p>
                                 </CardContent>
                                 <CardFooter>
                                     <Button onClick={() => handleOpenModal(debtor)} variant="outline" className="w-full bg-gray-700 border-gray-600 hover:bg-gray-600"><Info className="mr-2 h-4 w-4" /> Ver Detalhes</Button>
@@ -372,7 +241,7 @@ const BillingPage: React.FC = () => {
                 )}
             </div>
 
-            <DebtDetailModal isOpen={isModalOpen} onClose={handleCloseModal} debtor={selectedDebtor} user={user} />
+            {user && <DebtDetailModal isOpen={isModalOpen} onClose={handleCloseModal} debtor={selectedDebtor} user={user} />}
         </>
     );
 };
