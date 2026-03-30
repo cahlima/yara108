@@ -67,10 +67,11 @@ const DebtDetailModal: React.FC<DebtDetailModalProps> = ({ debtor, isOpen, onClo
                     ...doc.data()
                 } as ConsumptionItem));
 
-                // Agrupa os itens pelo mês da fatura
+                // Agrupa os itens pelo mês da fatura (por date ou por invoiceId)
                 for (const invoice of invoicesData) {
                     consumptionMap[invoice.id] = allItems.filter(item =>
-                        item.date && item.date.startsWith(invoice.month)
+                        (item.date && item.date.startsWith(invoice.month)) ||
+                        ((item as any).invoiceId === invoice.id)
                     );
                 }
                 setConsumptionByInvoice(consumptionMap);
