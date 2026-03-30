@@ -16,6 +16,7 @@ import { formatCurrency } from '@/lib/utils';
 interface Customer { id: string; name: string; phone?: string; }
 interface Debtor { customerId: string; customerName: string; customerPhone?: string; totalDebt: number; }
 interface Invoice { id: string; month: string; openTotal: number; status: 'open' | 'partial' | 'paid' | 'canceled'; customerId?: string; customerName?: string; }
+interface ConsumptionItem { id: string; product_name: string; quantity: number; unit_price: number; subtotal: number; date?: string; }
 
 // --- COMPONENTE DO MODAL ---
 
@@ -28,6 +29,7 @@ interface DebtDetailModalProps {
 
 const DebtDetailModal: React.FC<DebtDetailModalProps> = ({ debtor, isOpen, onClose, user }) => {
     const [invoices, setInvoices] = useState<Invoice[]>([]);
+    const [consumptionByInvoice, setConsumptionByInvoice] = useState<Record<string, ConsumptionItem[]>>({});
     const [isLoading, setIsLoading] = useState(false);
 
     useEffect(() => {
@@ -47,9 +49,31 @@ const DebtDetailModal: React.FC<DebtDetailModalProps> = ({ debtor, isOpen, onClo
                 
                 const invoicesData = invoicesSnapshot.docs
                     .map(doc => ({ id: doc.id, ...doc.data() } as Invoice))
-                    .filter(inv => inv.openTotal > 0.01); // Segurança extra
+                    .filter(inv => inv.openTotal > 0.01);
 
                 setInvoices(invoicesData);
+
+                // Busca todos os consumption_records do cliente de uma vez
+                const consumptionMap: Record<string, ConsumptionItem[]> = {};
+                const consumptionQuery = query(
+                    collection(db, 'consumption_records'),
+                    where('ownerId', '==', user.uid),
+                    where('customer_id', '==', debtor.customerId),
+                    where('payLater', '==', true)
+                );
+                const consumptionSnapshot = await getDocs(consumptionQuery);
+                const allItems = consumptionSnapshot.docs.map(doc => ({
+                    id: doc.id,
+                    ...doc.data()
+                } as ConsumptionItem));
+
+                // Agrupa os itens pelo mês da fatura
+                for (const invoice of invoicesData) {
+                    consumptionMap[invoice.id] = allItems.filter(item =>
+                        item.date && item.date.startsWith(invoice.month)
+                    );
+                }
+                setConsumptionByInvoice(consumptionMap);
 
             } catch (err) {
                 console.error("Erro ao buscar detalhes da dívida:", err);
@@ -79,7 +103,12 @@ const DebtDetailModal: React.FC<DebtDetailModalProps> = ({ debtor, isOpen, onClo
         invoices.forEach(invoice => {
             const monthName = format(parse(invoice.month, 'yyyy-MM', new Date()), "MMMM/yyyy", { locale: ptBR });
             const openTotalFormatted = formatCurrency(invoice.openTotal);
-            message += `- ${monthName}: ${openTotalFormatted}\n`;
+            message += `*${monthName}: ${openTotalFormatted}*\n`;
+            const items = consumptionByInvoice[invoice.id] || [];
+            items.forEach(item => {
+                message += `  - ${item.product_name} x${item.quantity}: ${formatCurrency(item.subtotal)}\n`;
+            });
+            message += '\n';
         });
 
         const totalDebtFormatted = formatCurrency(debtor.totalDebt);
@@ -105,17 +134,36 @@ const DebtDetailModal: React.FC<DebtDetailModalProps> = ({ debtor, isOpen, onClo
                     ) : invoices.length === 0 ? (
                         <div className="text-center py-10"><p className="text-gray-400">Não há faturas para este cliente.</p></div>
                     ) : (
-                        <div className="space-y-2">
+                        <Accordion type="single" collapsible className="space-y-2">
                             {invoices.map(invoice => {
                                 const monthName = format(parse(invoice.month, 'yyyy-MM', new Date()), "MMMM/yyyy", { locale: ptBR });
+                                const items = consumptionByInvoice[invoice.id] || [];
                                 return (
-                                    <div key={invoice.id} className="flex justify-between items-center p-3 bg-gray-800 rounded-md border border-gray-700">
-                                        <span className="capitalize text-gray-300">{monthName}</span>
-                                        <span className="font-bold text-red-400">{formatCurrency(invoice.openTotal)}</span>
-                                    </div>
+                                    <AccordionItem key={invoice.id} value={invoice.id} className="bg-gray-800 rounded-md border border-gray-700 px-3">
+                                        <AccordionTrigger className="hover:no-underline">
+                                            <div className="flex justify-between items-center w-full pr-2">
+                                                <span className="capitalize text-gray-300">{monthName}</span>
+                                                <span className="font-bold text-red-400">{formatCurrency(invoice.openTotal)}</span>
+                                            </div>
+                                        </AccordionTrigger>
+                                        <AccordionContent>
+                                            {items.length === 0 ? (
+                                                <p className="text-gray-500 text-sm py-2">Nenhum item de consumo encontrado.</p>
+                                            ) : (
+                                                <div className="space-y-1 pt-1 pb-2">
+                                                    {items.map(item => (
+                                                        <div key={item.id} className="flex justify-between items-center text-sm text-gray-400 py-1 border-t border-gray-700">
+                                                            <span>{item.productName} x{item.quantity}</span>
+                                                            <span>{formatCurrency(item.total)}</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </AccordionContent>
+                                    </AccordionItem>
                                 );
                             })}
-                        </div>
+                        </Accordion>
                     )}
                 </div>
                 <div className="pt-4 border-t border-gray-700">
