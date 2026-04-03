@@ -36,7 +36,7 @@ const Auth = () => {
       if (mode === "login") {
         await signInWithEmailAndPassword(auth, email, password);
         toast.success("Login bem-sucedido!");
-        navigate("/");
+        navigate("/dashboard");
       } else { // signup
         const userCredential = await createUserWithEmailAndPassword(auth, email, password);
         const user = userCredential.user;

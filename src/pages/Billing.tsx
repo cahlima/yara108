@@ -154,8 +154,8 @@ const DebtDetailModal: React.FC<DebtDetailModalProps> = ({ debtor, isOpen, onClo
                                                 <div className="space-y-1 pt-1 pb-2">
                                                     {items.map(item => (
                                                         <div key={item.id} className="flex justify-between items-center text-sm text-gray-400 py-1 border-t border-gray-700">
-                                                            <span>{item.productName} x{item.quantity}</span>
-                                                            <span>{formatCurrency(item.total)}</span>
+                                                            <span>{item.product_name} x{item.quantity}</span>
+                                                            <span>{formatCurrency(item.subtotal)}</span>
                                                         </div>
                                                     ))}
                                                 </div>
