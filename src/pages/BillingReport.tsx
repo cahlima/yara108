@@ -67,6 +67,41 @@ function toDayKey(value: any): string | null {
   return null;
 }
 
+
+// Componente auxiliar para tabela agrupada por cliente
+const ClientSummaryTable = ({ records, formatCurrency }: { records: any[], formatCurrency: (v: number) => string }) => {
+  const byClient: Record<string, { total: number; payLater: boolean }> = {};
+  records.forEach(rec => {
+    const key = rec.customerName || 'Venda direta';
+    if (!byClient[key]) byClient[key] = { total: 0, payLater: rec.payLater };
+    byClient[key].total += Number(rec.subtotal || 0);
+  });
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>Cliente</TableHead>
+          <TableHead className="text-center">Status</TableHead>
+          <TableHead className="text-right">Total</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {Object.entries(byClient).sort(([a], [b]) => a.localeCompare(b)).map(([name, data]) => (
+          <TableRow key={name}>
+            <TableCell className="font-medium">{name}</TableCell>
+            <TableCell className="text-center">
+              <span className={`px-2 py-1 text-xs rounded-full ${data.payLater ? "bg-orange-100 text-orange-800" : "bg-green-100 text-green-800"}`}>
+                {data.payLater ? "Fiado" : "Pago"}
+              </span>
+            </TableCell>
+            <TableCell className="text-right font-bold text-primary">{formatCurrency(data.total)}</TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  );
+};
+
 const BillingReport = () => {
   const { user, loading: authLoading } = useAuth();
 
@@ -79,6 +114,7 @@ const BillingReport = () => {
   });
   const [loading, setLoading] = useState(true);
   const [loadingReport, setLoadingReport] = useState(false);
+  const [dayTotals, setDayTotals] = useState<Record<string, number>>({});
 
   // Busca inicial para encontrar todos os dias com vendas
   const fetchActiveDays = useCallback(async (ownerId: string) => {
@@ -101,8 +137,16 @@ const BillingReport = () => {
 
       const sortedDays = Array.from(dates).sort((a, b) => b.localeCompare(a));
       setActiveDays(sortedDays);
-      
-      console.log("activeDays:", sortedDays.slice(0, 10), "total:", sortedDays.length);
+
+      // Calcula totais por dia
+      const totals: Record<string, number> = {};
+      snapshot.forEach((d) => {
+        const dayKey = toDayKey(d.data()?.date);
+        if (dayKey) {
+          totals[dayKey] = (totals[dayKey] || 0) + Number(d.data()?.subtotal || 0);
+        }
+      });
+      setDayTotals(totals);
 
     } catch (error: any) {
       console.error("Erro ao buscar dias com vendas:", error);
@@ -131,16 +175,17 @@ const BillingReport = () => {
             if (!data.payLater) totalReceived += subtotal;
 
             let customerName = "Venda direta";
-            if (data.customerId && typeof data.customerId === "string" && data.customerId.trim() !== "") {
-                const cachedName = customerCache.get(data.customerId);
+            const customerId = (data as any).customerId || (data as any).customer_id;
+            if (customerId && typeof customerId === "string" && customerId.trim() !== "") {
+                const cachedName = customerCache.get(customerId);
                 if (cachedName) {
                     customerName = cachedName;
                 } else {
                     try {
-                        const customerRef = doc(db, "customers", data.customerId);
+                        const customerRef = doc(db, "customers", customerId);
                         const customerSnap = await getDoc(customerRef);
                         const fetchedName = customerSnap.exists() ? (customerSnap.data() as any)?.name ?? "Cliente sem nome" : "Cliente não encontrado";
-                        customerCache.set(data.customerId, fetchedName);
+                        customerCache.set(customerId, fetchedName);
                         customerName = fetchedName;
                     } catch (e) {
                         console.error(`Falha ao buscar cliente ID: ${data.customerId}`, e);
@@ -316,40 +361,7 @@ const BillingReport = () => {
                   Nenhuma venda registrada neste dia.
                 </p>
               ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Cliente</TableHead>
-                      <TableHead>Produto</TableHead>
-                      <TableHead className="text-center">Qtd.</TableHead>
-                      <TableHead className="text-right">Subtotal</TableHead>
-                      <TableHead className="text-center">Status</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {dayRecords.map((rec) => (
-                      <TableRow key={rec.id}>
-                        <TableCell className="font-medium">{rec.customerName}</TableCell>
-                        <TableCell>{rec.product_name}</TableCell>
-                        <TableCell className="text-center">{rec.quantity}</TableCell>
-                        <TableCell className="text-right">
-                          {formatCurrency(Number(rec.subtotal || 0))}
-                        </TableCell>
-                        <TableCell className="text-center">
-                          <span
-                            className={`px-2 py-1 text-xs rounded-full ${
-                              rec.payLater
-                                ? "bg-orange-100 text-orange-800"
-                                : "bg-green-100 text-green-800"
-                            }`}
-                          >
-                            {rec.payLater ? "Fiado" : "Pago"}
-                          </span>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                <ClientSummaryTable records={dayRecords} formatCurrency={formatCurrency} />
               )}
             </CardContent>
           </Card>
@@ -359,21 +371,32 @@ const BillingReport = () => {
       {activeDays.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle>Dias com Vendas (Atalhos)</CardTitle>
-            <p className="text-sm text-muted-foreground pt-1">
-              Clique em um dia para ver o relatório.
-            </p>
+            <CardTitle className="flex items-center gap-2"><CalendarDays className="h-5 w-5" /> Dias com Vendas</CardTitle>
+            <p className="text-sm text-muted-foreground pt-1">Clique em um dia para ver o relatório.</p>
           </CardHeader>
           <CardContent className="flex flex-wrap gap-2">
-            {activeDays.map((dayStr) => (
-              <Button
-                key={dayStr}
-                variant={format(selectedDate || new Date(), 'yyyy-MM-dd') === dayStr ? "default" : "outline"}
-                onClick={() => handleDateSelect(parseISO(dayStr))}
-              >
-                {format(parseISO(dayStr), "dd/MM/yy")}
-              </Button>
-            ))}
+            {activeDays.map((dayStr) => {
+              const d = parseISO(dayStr);
+              const isSelected = format(selectedDate || new Date(), 'yyyy-MM-dd') === dayStr;
+              const weekDay = format(d, "EEE", { locale: ptBR });
+              const total = dayTotals[dayStr];
+              return (
+                <Button
+                  key={dayStr}
+                  variant={isSelected ? "default" : "outline"}
+                  onClick={() => handleDateSelect(d)}
+                  className="flex flex-col h-auto py-2 px-3 text-center min-w-[80px]"
+                >
+                  <span className="text-xs capitalize opacity-70">{weekDay}</span>
+                  <span className="font-bold">{format(d, "dd/MM/yy")}</span>
+                  {total !== undefined && (
+                    <span className={`text-xs ${isSelected ? 'opacity-80' : 'text-green-600'}`}>
+                      R$ {total.toFixed(2).replace('.', ',')}
+                    </span>
+                  )}
+                </Button>
+              );
+            })}
           </CardContent>
         </Card>
       )}

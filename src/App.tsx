@@ -22,7 +22,6 @@ import Payments from "@/pages/Payments";
 import PaymentHistory from "@/pages/PaymentHistory";
 import Products from "@/pages/Products";
 import PendingApproval from "@/pages/PendingApproval";
-import Reports from "@/pages/Reports";
 
 
 const LayoutWrapper = () => {
@@ -81,7 +80,7 @@ function App() {
                 <Route path="admin" element={<Admin />} />
                 <Route path="billing-report" element={<BillingReport />} />
                 <Route path="daily-report" element={<DailyReport />} />
-                <Route path="reports" element={<Reports />} />
+                <Route path="reports" element={<BillingReport />} />
               </Route>
             </Route>
           </Route>

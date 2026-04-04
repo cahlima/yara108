@@ -53,26 +53,33 @@ const DebtDetailModal: React.FC<DebtDetailModalProps> = ({ debtor, isOpen, onClo
 
                 setInvoices(invoicesData);
 
-                // Busca todos os consumption_records do cliente de uma vez
+                // Busca consumption_records por invoiceId para cada fatura
                 const consumptionMap: Record<string, ConsumptionItem[]> = {};
-                const consumptionQuery = query(
-                    collection(db, 'consumption_records'),
-                    where('ownerId', '==', user.uid),
-                    where('customer_id', '==', debtor.customerId),
-                    where('payLater', '==', true)
-                );
-                const consumptionSnapshot = await getDocs(consumptionQuery);
-                const allItems = consumptionSnapshot.docs.map(doc => ({
-                    id: doc.id,
-                    ...doc.data()
-                } as ConsumptionItem));
-
-                // Agrupa os itens pelo mês da fatura (por date ou por invoiceId)
                 for (const invoice of invoicesData) {
-                    consumptionMap[invoice.id] = allItems.filter(item =>
-                        (item.date && item.date.startsWith(invoice.month)) ||
-                        ((item as any).invoiceId === invoice.id)
+                    const q1 = query(
+                        collection(db, 'consumption_records'),
+                        where('ownerId', '==', user.uid),
+                        where('invoiceId', '==', invoice.id)
                     );
+                    const q2 = query(
+                        collection(db, 'consumption_records'),
+                        where('ownerId', '==', user.uid),
+                        where('customer_id', '==', debtor.customerId),
+                        where('payLater', '==', true)
+                    );
+                    const [snap1, snap2] = await Promise.all([getDocs(q1), getDocs(q2)]);
+                    const seen = new Set<string>();
+                    const merged: ConsumptionItem[] = [];
+                    for (const d of [...snap1.docs, ...snap2.docs]) {
+                        if (!seen.has(d.id)) {
+                            seen.add(d.id);
+                            merged.push({ id: d.id, ...d.data() } as ConsumptionItem);
+                        }
+                    }
+                    consumptionMap[invoice.id] = merged.filter(item =>
+                        (item as any).invoiceId === invoice.id ||
+                        (item.date && item.date.startsWith(invoice.month))
+                    ).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
                 }
                 setConsumptionByInvoice(consumptionMap);
 
@@ -106,8 +113,21 @@ const DebtDetailModal: React.FC<DebtDetailModalProps> = ({ debtor, isOpen, onClo
             const openTotalFormatted = formatCurrency(invoice.openTotal);
             message += `*${monthName}: ${openTotalFormatted}*\n`;
             const items = consumptionByInvoice[invoice.id] || [];
+            // Agrupa por dia
+            const byDay: Record<string, ConsumptionItem[]> = {};
             items.forEach(item => {
-                message += `  - ${item.product_name} x${item.quantity}: ${formatCurrency(item.subtotal)}\n`;
+                const day = item.date || 'sem data';
+                if (!byDay[day]) byDay[day] = [];
+                byDay[day].push(item);
+            });
+            Object.keys(byDay).sort().forEach(day => {
+                const dayLabel = day !== 'sem data'
+                    ? format(new Date(day + 'T12:00:00'), "dd/MM/yyyy", { locale: ptBR })
+                    : 'Sem data';
+                message += `  📅 ${dayLabel}\n`;
+                byDay[day].forEach(item => {
+                    message += `    - ${item.product_name} x${item.quantity}: ${formatCurrency(item.subtotal)}\n`;
+                });
             });
             message += '\n';
         });

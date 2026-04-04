@@ -537,14 +537,25 @@ const Consumption = () => {
 
   return (
     <div className="space-y-8">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-3xl font-bold text-foreground">Lançar Consumo</h2>
-          <p className="text-muted-foreground">Selecione a data para ver e adicionar consumos.</p>
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-3xl font-bold text-foreground">Lançar Consumo</h2>
+            <p className="text-muted-foreground">Selecione a data para ver e adicionar consumos.</p>
+          </div>
         </div>
         <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
           <PopoverTrigger asChild>
-            <Button variant={"outline"}><CalendarIcon className="mr-2 h-4 w-4" />{format(consumptionDate, "PPP", { locale: ptBR })}</Button>
+            <button className="w-full flex items-center justify-between px-5 py-4 rounded-xl border-2 border-orange-400 bg-orange-50 hover:bg-orange-100 transition-colors cursor-pointer">
+              <div className="flex items-center gap-3">
+                <CalendarIcon className="h-6 w-6 text-orange-500" />
+                <div className="text-left">
+                  <p className="text-xs text-orange-500 font-semibold uppercase tracking-wide">Data Selecionada</p>
+                  <p className="text-xl font-bold text-orange-700 capitalize">{format(consumptionDate, "EEEE, dd 'de' MMMM 'de' yyyy", { locale: ptBR })}</p>
+                </div>
+              </div>
+              <span className="text-xs text-orange-400 font-medium">Clique para alterar →</span>
+            </button>
           </PopoverTrigger>
           <PopoverContent className="w-auto p-0">
             <Calendar mode="single" selected={consumptionDate} onSelect={(date) => { if (date) { setConsumptionDate(startOfDay(date)); setIsCalendarOpen(false); }}} initialFocus />
