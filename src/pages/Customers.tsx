@@ -122,7 +122,26 @@ const Customers = () => {
       return;
     }
     try {
-      const dataToSave = { ...validation.data, phone: validation.data.phone?.replace(/\D/g, '') || null };
+      const cleanPhone = validation.data.phone?.replace(/\D/g, '') || null;
+      const dataToSave = { ...validation.data, phone: cleanPhone };
+
+      // Verifica duplicidade por telefone
+      if (cleanPhone) {
+        const duplicateQuery = query(
+          collection(db, "customers"),
+          where("ownerId", "==", user.uid),
+          where("phone", "==", cleanPhone)
+        );
+        const duplicateSnap = await getDocs(duplicateQuery);
+        const duplicate = duplicateSnap.docs.find(d => d.id !== editingCustomer?.id);
+        if (duplicate) {
+          const dupName = (duplicate.data() as any).name;
+          toast.error(`Telefone já cadastrado`, { description: `Este número já pertence ao cliente "${dupName}".` });
+          setIsSubmitting(false);
+          return;
+        }
+      }
+
       if (editingCustomer) {
         await updateDoc(doc(db, "customers", editingCustomer.id), { ...dataToSave, updatedAt: serverTimestamp() });
         toast.success("Cliente atualizado!");
