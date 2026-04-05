@@ -62,8 +62,8 @@ service cloud.firestore {
     match /day_products/{dayProductId} {
       allow read: if isAdmin() || idStartsWithUid(dayProductId);
       allow create: if idStartsWithUid(dayProductId) && isOwnerCreate('ownerId');
-      allow update: if (isAdmin() || idStartsWithUid(dayProductId)) && ownerUnchanged('ownerId');
-      allow delete: if isAdmin();
+      allow update: if isAdmin() || idStartsWithUid(dayProductId);
+      allow delete: if isAdmin() || idStartsWithUid(dayProductId);
     }
 
     match /consumption_records/{recordId} {
