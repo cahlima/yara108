@@ -22,6 +22,7 @@ import Payments from "@/pages/Payments";
 import PaymentHistory from "@/pages/PaymentHistory";
 import Products from "@/pages/Products";
 import PendingApproval from "@/pages/PendingApproval";
+import PhotoLaunch from "@/pages/PhotoLaunch";
 
 
 const LayoutWrapper = () => {
@@ -75,6 +76,7 @@ function App() {
               <Route path="products" element={<Products />} />
               <Route path="customers" element={<Customers />} />
               <Route path="billing" element={<Billing />} />
+              <Route path="photo-launch" element={<PhotoLaunch />} />
               
               <Route element={<AdminRoute />}>
                 <Route path="admin" element={<Admin />} />

@@ -1,5 +1,5 @@
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { db } from "@/lib/firebase";
 import {
   collection,
@@ -134,6 +134,8 @@ const Consumption = () => {
   // Day products selection
   const [availableProducts, setAvailableProducts] = useState<Product[]>([]);
   const [selectedProductToAdd, setSelectedProductToAdd] = useState('');
+  const customerSelectRef = useRef<HTMLButtonElement>(null);
+  const productSelectRef = useRef<HTMLButtonElement>(null);
 
   // Select open states
   const [customerOpen, setCustomerOpen] = useState(false);
@@ -278,6 +280,8 @@ const Consumption = () => {
     setQuantity(1);
     setSelectedProduct("");
     setProductOpen(false);
+    // Foca no produto para próximo lançamento
+    setTimeout(() => productSelectRef.current?.click(), 100);
   };
 
   const removeItem = (index: number) => {
@@ -339,6 +343,8 @@ const Consumption = () => {
         setSelectedCustomer("");
         setSelectedProduct("");
         fetchConsumptionRecords(consumptionDate, user.uid);
+        // Foca no cliente para próximo lançamento
+        setTimeout(() => customerSelectRef.current?.click(), 300);
     } catch (e) {
       const err = e as FirestoreError;
       console.error("Erro ao salvar consumo:", err);
@@ -607,14 +613,14 @@ const Consumption = () => {
                 <div>
                   <Label>Cliente</Label>
                   <Select open={customerOpen} onOpenChange={setCustomerOpen} value={selectedCustomer} onValueChange={setSelectedCustomer} disabled={items.length > 0}>
-                    <SelectTrigger><SelectValue placeholder="Selecione o cliente..." /></SelectTrigger>
+                    <SelectTrigger ref={customerSelectRef}><SelectValue placeholder="Selecione o cliente..." /></SelectTrigger>
                     <SelectContent>{customers.map((c) => (<SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>))}</SelectContent>
                   </Select>
                 </div>
                 <div>
                   <Label>Produto</Label>
                   <Select open={productOpen} onOpenChange={setProductOpen} value={safeSelectedProduct} onValueChange={setSelectedProduct} disabled={!selectedCustomer || isDayProductsLoading || dayProducts.length === 0}>
-                    <SelectTrigger><SelectValue placeholder={dayProducts.length === 0 ? "Adicione produtos do dia" : "Selecione o produto..."} /></SelectTrigger>
+                    <SelectTrigger ref={productSelectRef}><SelectValue placeholder={dayProducts.length === 0 ? "Adicione produtos do dia" : "Selecione o produto..."} /></SelectTrigger>
                     <SelectContent>{dayProducts.map((p) => (<SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>))}</SelectContent>
                   </Select>
                 </div>

@@ -1,6 +1,6 @@
 
 import { NavLink } from "react-router-dom";
-import { Home, ShoppingCart, Users, DollarSign, BarChart, Settings, LogOut, FileText, LineChart, History } from "lucide-react";
+import { Home, ShoppingCart, Users, DollarSign, BarChart, Settings, LogOut, FileText, LineChart, History, Camera } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth"; // Import useAuth
 import React from "react";
@@ -56,6 +56,10 @@ const AppLayout = ({ isAdmin, children }: AppLayoutProps) => {
               <NavLink to="/customers" className={({ isActive }) => navLinkClass(isActive)}>
                 <Users className="h-4 w-4" />
                 Clientes
+              </NavLink>
+              <NavLink to="/photo-launch" className={({ isActive }) => navLinkClass(isActive)}>
+                <Camera className="h-4 w-4" />
+                Foto Caderno
               </NavLink>
               <NavLink to="/billing" className={({ isActive }) => navLinkClass(isActive)}>
                 <DollarSign className="h-4 w-4" />
